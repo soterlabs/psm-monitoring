@@ -3,6 +3,5 @@ dist/
 .env
 .env.*
 !.env.example
-.railway/
 npm-debug.log*
 .DS_Store

@@ -2,6 +2,8 @@
 
 Live, read-only monitoring for the [Sky LitePSM USDC-A](https://etherscan.io/address/0xf6e72Db5454dd049d0788e411b06CfAF16853042) on Ethereum mainnet.
 
+**Live dashboard:** [psm-monitoring-production.up.railway.app](https://psm-monitoring-production.up.railway.app)
+
 The service reads the PSM's configured `pocket()` and `gem()` on-chain, verifies that the gem is Ethereum USDC, and adds:
 
 ```text
@@ -47,7 +49,7 @@ npm run build
 
 ## Deploy to Railway
 
-The repository includes a production `Dockerfile` and `railway.toml`. Create a Railway service from this GitHub repository and set `ETH_RPC`. Railway supplies `PORT` automatically.
+The repository includes a production `Dockerfile` and Railway infrastructure-as-code in `.railway/railway.ts`. Create a Railway service from this GitHub repository, set `ETH_RPC`, and run `railway config apply`. Railway supplies `PORT` automatically.
 
 Optional alerting works with generic JSON, Slack, or Discord webhooks:
 
