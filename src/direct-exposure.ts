@@ -16,11 +16,10 @@ export const directExposureVenues: DirectExposureVenue[] = [
   { id: "grove:E8", prime: "Grove", label: "JAAA (historical, capped)", assetKind: "treasury", conversion: "Fund redemption to USDC" },
   { id: "grove:E9", prime: "Grove", label: "JTRSY", assetKind: "treasury", conversion: "Fund redemption to USDC" },
   { id: "grove:E10", prime: "Grove", label: "BUIDL-I", assetKind: "treasury", conversion: "Fund redemption to USDC" },
-  { id: "grove:psm3", prime: "Grove", label: "PSM3 USDC (non-Ethereum)", assetKind: "usdc", conversion: "Bridge/transfer USDC" },
   { id: "spark:S21", prime: "Spark", label: "USTB", assetKind: "treasury", conversion: "Fund redemption to USDC" },
   { id: "spark:S24", prime: "Spark", label: "Curve USDT reserve", assetKind: "usdt", conversion: "Swap USDT to USDC" },
   { id: "spark:S62", prime: "Spark", label: "Uniswap V4 USDT reserve", assetKind: "usdt", conversion: "Swap USDT to USDC" },
-  { id: "spark:psm3", prime: "Spark", label: "PSM3 USDC (non-Ethereum)", assetKind: "usdc", conversion: "Bridge/transfer USDC" },
+  { id: "spark:psm3", prime: "Spark", label: "PSM3 USDC (four L2s)", assetKind: "usdc", conversion: "Transfer or bridge USDC" },
 ];
 
 type JsonObject = Record<string, unknown>;

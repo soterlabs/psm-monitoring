@@ -3,16 +3,17 @@ import { getAddress } from "viem";
 import { loadConfig } from "./config.js";
 import { makeClient } from "./chain.js";
 import { dashboardHtml } from "./dashboard.js";
-import { directExposureDashboardHtml } from "./direct-dashboard.js";
 import { DirectExposureMonitor } from "./direct-exposure.js";
 import { Monitor } from "./monitor.js";
 import { HistoryMonitor } from "./history.js";
+import { Psm3Monitor } from "./psm3.js";
 
 const config = loadConfig();
 const client = makeClient(config);
 const monitor = new Monitor(client, config);
 const history = new HistoryMonitor(client, config);
 const directExposure = new DirectExposureMonitor();
+const psm3 = new Psm3Monitor();
 let historyWaitTimer: NodeJS.Timeout | undefined;
 
 function send(response: ServerResponse, status: number, contentType: string, body: string): void {
@@ -70,6 +71,16 @@ function metrics(): string {
       `sky_direct_exposure_as_of_timestamp_seconds ${Date.parse(`${latestExposure.date}T00:00:00Z`) / 1_000}`,
     );
   }
+  if (psm3.snapshot) {
+    lines.push(
+      "# HELP sky_psm3_usdc_reserve USDC held directly by an L2 PSM3 contract.",
+      "# TYPE sky_psm3_usdc_reserve gauge",
+      ...psm3.snapshot.chains.map((chain) => `sky_psm3_usdc_reserve{chain="${chain.chain.toLowerCase()}"} ${chain.reserveUsdc}`),
+      "# HELP sky_psm3_usdc_reserve_total Total USDC held by the four monitored L2 PSM3 contracts.",
+      "# TYPE sky_psm3_usdc_reserve_total gauge",
+      `sky_psm3_usdc_reserve_total ${psm3.snapshot.totalReserveUsdc}`,
+    );
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -78,7 +89,7 @@ const server = createServer((request, response) => {
   const path = url.pathname;
   if (request.method !== "GET") return send(response, 405, "text/plain; charset=utf-8", "Method not allowed\n");
   if (path === "/") return send(response, 200, "text/html; charset=utf-8", dashboardHtml);
-  if (path === "/direct-exposure") return send(response, 200, "text/html; charset=utf-8", directExposureDashboardHtml);
+  if (path === "/direct-exposure") return send(response, 200, "text/html; charset=utf-8", dashboardHtml);
   if (path === "/healthz") return send(response, 200, "application/json; charset=utf-8", '{"status":"alive"}\n');
   if (path === "/readyz") {
     const fresh = monitor.isFresh();
@@ -104,6 +115,13 @@ const server = createServer((request, response) => {
       error: directExposure.lastError ?? null,
     })}\n`);
   }
+  if (path === "/api/psm3") {
+    return send(response, psm3.snapshot ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({
+      loading: psm3.loading,
+      snapshot: psm3.snapshot ?? null,
+      error: psm3.lastError ?? null,
+    })}\n`);
+  }
   if (path === "/metrics") return send(response, 200, "text/plain; version=0.0.4; charset=utf-8", metrics());
   return send(response, 404, "text/plain; charset=utf-8", "Not found\n");
 });
@@ -111,6 +129,7 @@ const server = createServer((request, response) => {
 await monitor.poll();
 monitor.start();
 directExposure.start();
+psm3.start();
 server.listen(config.port, "0.0.0.0", () => {
   console.log(JSON.stringify({ event: "server_started", port: config.port }));
   const startHistory = (): void => {
@@ -131,6 +150,7 @@ function shutdown(signal: string): void {
   monitor.stop();
   history.stop();
   directExposure.stop();
+  psm3.stop();
   if (historyWaitTimer) clearInterval(historyWaitTimer);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10_000).unref();
