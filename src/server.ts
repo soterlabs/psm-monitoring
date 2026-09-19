@@ -1,0 +1,81 @@
+import { createServer, type ServerResponse } from "node:http";
+import { loadConfig } from "./config.js";
+import { makeClient } from "./chain.js";
+import { dashboardHtml } from "./dashboard.js";
+import { Monitor } from "./monitor.js";
+
+const config = loadConfig();
+const monitor = new Monitor(makeClient(config), config);
+
+function send(response: ServerResponse, status: number, contentType: string, body: string): void {
+  response.writeHead(status, {
+    "content-type": contentType,
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "DENY",
+    "referrer-policy": "no-referrer",
+  });
+  response.end(body);
+}
+
+function metrics(): string {
+  const snapshot = monitor.snapshot;
+  const fresh = monitor.isFresh() ? 1 : 0;
+  const lines = [
+    "# HELP psm_monitor_data_fresh Whether the most recent reading is fresh.",
+    "# TYPE psm_monitor_data_fresh gauge",
+    `psm_monitor_data_fresh ${fresh}`,
+    "# HELP psm_monitor_rpc_error Whether the latest poll failed.",
+    "# TYPE psm_monitor_rpc_error gauge",
+    `psm_monitor_rpc_error ${monitor.lastError ? 1 : 0}`,
+  ];
+  if (snapshot) {
+    lines.push(
+      "# HELP psm_usdc_balance USDC held by the LitePSM and its pocket.",
+      "# TYPE psm_usdc_balance gauge",
+      `psm_usdc_balance ${snapshot.totalBalanceUsdc}`,
+      "# HELP psm_usdc_limit Configured USDC operational limit.",
+      "# TYPE psm_usdc_limit gauge",
+      `psm_usdc_limit ${snapshot.limitUsdc}`,
+      "# HELP psm_usdc_utilization_ratio Balance divided by configured limit.",
+      "# TYPE psm_usdc_utilization_ratio gauge",
+      `psm_usdc_utilization_ratio ${snapshot.utilizationPercent / 100}`,
+      "# HELP psm_monitor_last_success_timestamp_seconds Unix time of the latest successful poll.",
+      "# TYPE psm_monitor_last_success_timestamp_seconds gauge",
+      `psm_monitor_last_success_timestamp_seconds ${Date.parse(snapshot.checkedAt) / 1_000}`,
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+const server = createServer((request, response) => {
+  const path = new URL(request.url ?? "/", "http://localhost").pathname;
+  if (request.method !== "GET") return send(response, 405, "text/plain; charset=utf-8", "Method not allowed\n");
+  if (path === "/") return send(response, 200, "text/html; charset=utf-8", dashboardHtml);
+  if (path === "/healthz") return send(response, 200, "application/json; charset=utf-8", '{"status":"alive"}\n');
+  if (path === "/readyz") {
+    const fresh = monitor.isFresh();
+    return send(response, fresh ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({ status: fresh ? "ready" : "not_ready" })}\n`);
+  }
+  if (path === "/api/status") {
+    const fresh = monitor.isFresh();
+    return send(response, monitor.snapshot ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({ fresh, snapshot: monitor.snapshot ?? null, error: monitor.lastError ?? null })}\n`);
+  }
+  if (path === "/metrics") return send(response, 200, "text/plain; version=0.0.4; charset=utf-8", metrics());
+  return send(response, 404, "text/plain; charset=utf-8", "Not found\n");
+});
+
+await monitor.poll();
+monitor.start();
+server.listen(config.port, "0.0.0.0", () => {
+  console.log(JSON.stringify({ event: "server_started", port: config.port }));
+});
+
+function shutdown(signal: string): void {
+  console.log(JSON.stringify({ event: "shutdown", signal }));
+  monitor.stop();
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
