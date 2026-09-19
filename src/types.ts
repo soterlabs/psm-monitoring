@@ -49,3 +49,30 @@ export interface HistorySeries {
   limitUsdc: string;
   points: HistoryPoint[];
 }
+
+export type DirectExposureRange = "90d" | "monthly";
+
+export interface DirectExposureVenue {
+  id: string;
+  prime: "Grove" | "Spark";
+  label: string;
+  assetKind: "treasury" | "usdc" | "usdt";
+  conversion: string;
+}
+
+export interface DirectExposurePoint {
+  date: string;
+  totalUsd: number;
+  venues: Record<string, number>;
+}
+
+export interface DirectExposureSeries {
+  range: DirectExposureRange;
+  interval: "daily" | "monthly";
+  generatedAt: string;
+  asOf: string;
+  provisional: boolean;
+  unit: "USD (USDC-equivalent)";
+  venues: DirectExposureVenue[];
+  points: DirectExposurePoint[];
+}

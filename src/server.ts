@@ -3,6 +3,8 @@ import { getAddress } from "viem";
 import { loadConfig } from "./config.js";
 import { makeClient } from "./chain.js";
 import { dashboardHtml } from "./dashboard.js";
+import { directExposureDashboardHtml } from "./direct-dashboard.js";
+import { DirectExposureMonitor } from "./direct-exposure.js";
 import { Monitor } from "./monitor.js";
 import { HistoryMonitor } from "./history.js";
 
@@ -10,6 +12,7 @@ const config = loadConfig();
 const client = makeClient(config);
 const monitor = new Monitor(client, config);
 const history = new HistoryMonitor(client, config);
+const directExposure = new DirectExposureMonitor();
 let historyWaitTimer: NodeJS.Timeout | undefined;
 
 function send(response: ServerResponse, status: number, contentType: string, body: string): void {
@@ -50,6 +53,23 @@ function metrics(): string {
       `psm_monitor_last_success_timestamp_seconds ${Date.parse(snapshot.checkedAt) / 1_000}`,
     );
   }
+  const exposure = directExposure.series.get("90d");
+  const latestExposure = exposure?.points.at(-1);
+  lines.push(
+    "# HELP sky_direct_exposure_data_available Whether direct-exposure data is available.",
+    "# TYPE sky_direct_exposure_data_available gauge",
+    `sky_direct_exposure_data_available ${latestExposure ? 1 : 0}`,
+  );
+  if (latestExposure) {
+    lines.push(
+      "# HELP sky_direct_exposure_usdc_equivalent Estimated SDE refill capacity in USD (USDC-equivalent).",
+      "# TYPE sky_direct_exposure_usdc_equivalent gauge",
+      `sky_direct_exposure_usdc_equivalent ${latestExposure.totalUsd}`,
+      "# HELP sky_direct_exposure_as_of_timestamp_seconds Date represented by the latest SDE estimate.",
+      "# TYPE sky_direct_exposure_as_of_timestamp_seconds gauge",
+      `sky_direct_exposure_as_of_timestamp_seconds ${Date.parse(`${latestExposure.date}T00:00:00Z`) / 1_000}`,
+    );
+  }
   return `${lines.join("\n")}\n`;
 }
 
@@ -58,6 +78,7 @@ const server = createServer((request, response) => {
   const path = url.pathname;
   if (request.method !== "GET") return send(response, 405, "text/plain; charset=utf-8", "Method not allowed\n");
   if (path === "/") return send(response, 200, "text/html; charset=utf-8", dashboardHtml);
+  if (path === "/direct-exposure") return send(response, 200, "text/html; charset=utf-8", directExposureDashboardHtml);
   if (path === "/healthz") return send(response, 200, "application/json; charset=utf-8", '{"status":"alive"}\n');
   if (path === "/readyz") {
     const fresh = monitor.isFresh();
@@ -75,12 +96,21 @@ const server = createServer((request, response) => {
       error: history.lastError ?? null,
     })}\n`);
   }
+  if (path === "/api/direct-exposure") {
+    const range = url.searchParams.get("range") === "monthly" ? "monthly" : "90d";
+    return send(response, directExposure.series.has(range) ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({
+      loading: directExposure.loading,
+      series: directExposure.series.get(range) ?? null,
+      error: directExposure.lastError ?? null,
+    })}\n`);
+  }
   if (path === "/metrics") return send(response, 200, "text/plain; version=0.0.4; charset=utf-8", metrics());
   return send(response, 404, "text/plain; charset=utf-8", "Not found\n");
 });
 
 await monitor.poll();
 monitor.start();
+directExposure.start();
 server.listen(config.port, "0.0.0.0", () => {
   console.log(JSON.stringify({ event: "server_started", port: config.port }));
   const startHistory = (): void => {
@@ -100,6 +130,7 @@ function shutdown(signal: string): void {
   console.log(JSON.stringify({ event: "shutdown", signal }));
   monitor.stop();
   history.stop();
+  directExposure.stop();
   if (historyWaitTimer) clearInterval(historyWaitTimer);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10_000).unref();

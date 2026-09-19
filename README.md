@@ -19,6 +19,8 @@ It compares that balance with a 4 billion USDC minimum target. Defaults are:
 
 The dashboard also charts daily on-chain snapshots for the last 90 days and monthly snapshots from January 2025 onward. History is reconstructed from archive RPC reads at startup and refreshed every six hours.
 
+The [Sky Direct Exposure dashboard](https://psm-monitoring-production.up.railway.app/direct-exposure) shows the USDC-equivalent capacity available across Grove and Spark SDE venues, both per venue and in aggregate. It includes daily history for the latest 90-day window and month-end history from January 2026. See [DIRECT_EXPOSURE.md](DIRECT_EXPOSURE.md) for its scope, calculation, and liquidity caveats.
+
 See [MONITORING_PLAN.md](MONITORING_PLAN.md) for the monitoring and response plan.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for a concise explanation of the pocket, LitePSM, USDS PSM Wrapper, and DAI–USDS converter.
 
@@ -27,7 +29,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for a concise explanation of the pocket, 
 - `/` — live dashboard, refreshed every 30 seconds
 - `/api/status` — machine-readable status and most recent RPC error
 - `/api/history?range=90d` — daily historical series (`range=monthly` for January 2025 onward)
-- `/metrics` — Prometheus metrics
+- `/direct-exposure` — Sky Direct Exposure refill-capacity dashboard
+- `/api/direct-exposure?range=90d` — per-venue daily series (`range=monthly` from January 2026)
+- `/metrics` — Prometheus metrics for LitePSM health and aggregate SDE capacity
 - `/healthz` — process liveness (Railway health check)
 - `/readyz` — `200` only when an on-chain reading is fresh
 
@@ -77,6 +81,7 @@ The webhook receives an alert on entry into a warning state, on severity changes
 | `STALE_AFTER_SECONDS` | no | `180` | Reading age that fails readiness |
 | `ALERT_WEBHOOK_URL` | no | — | Alert destination |
 | `ALERT_REMINDER_SECONDS` | no | `3600` | Re-alert interval; minimum 60 |
+| `SETTLEMENT_API_URL` | no | public settle API | Override the SDE daily-data service |
 
 Secrets are runtime configuration only. `.env` files are ignored by git.
 
