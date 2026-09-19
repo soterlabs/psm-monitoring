@@ -20,6 +20,7 @@ It compares that balance with a 4 billion USDC minimum target. Defaults are:
 The dashboard also charts daily on-chain snapshots for the last 90 days and monthly snapshots from January 2025 onward. History is reconstructed from archive RPC reads at startup and refreshed every six hours.
 
 See [MONITORING_PLAN.md](MONITORING_PLAN.md) for the monitoring and response plan.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for a concise explanation of the pocket, LitePSM, USDS PSM Wrapper, and DAI–USDS converter.
 
 ## Endpoints
 

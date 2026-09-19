@@ -15,6 +15,8 @@ Every 60 seconds the service reads one Ethereum block and:
 
 The pocket is included because the [LitePSM design](https://github.com/sky-ecosystem/dss-lite-psm) intentionally keeps gem liquidity in a separate `pocket` address. Looking only at the PSM contract would normally report zero USDC and miss the exposure.
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the contract-by-contract flow and the role of the USDS wrapper.
+
 The 4B value is a minimum operational target supplied for this monitor. A balance at or above it is healthy. It is not inferred from, and should not be confused with, Sky's mutable on-chain debt-ceiling parameters.
 
 ## Thresholds
