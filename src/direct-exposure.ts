@@ -167,9 +167,10 @@ export class DirectExposureMonitor {
       const generatedAt = new Date().toISOString();
       const base = { generatedAt, asOf, provisional: true, unit: "USD (USDC-equivalent)" as const, venues: directExposureVenues };
       this.series.set("90d", { ...base, range: "90d", interval: "daily", points: daily });
+      this.series.set("ytd", { ...base, range: "ytd", interval: "daily", points: all.filter((point) => point.date >= "2026-01-01") });
       this.series.set("monthly", { ...base, range: "monthly", interval: "monthly", points: monthly });
       delete this.lastError;
-      console.log(JSON.stringify({ event: "direct_exposure_loaded", asOf, dailyPoints: daily.length, monthlyPoints: monthly.length }));
+      console.log(JSON.stringify({ event: "direct_exposure_loaded", asOf, dailyPoints: daily.length, ytdPoints: this.series.get("ytd")?.points.length, monthlyPoints: monthly.length }));
     } catch (error) {
       const message = safeErrorMessage(error);
       this.lastError = { message, at: new Date().toISOString() };

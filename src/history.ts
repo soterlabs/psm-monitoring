@@ -9,8 +9,9 @@ const DAY_MS = 86_400_000;
 const HISTORY_REFRESH_MS = 6 * 60 * 60 * 1_000;
 
 export function historyTargets(range: HistoryRange, now: Date): Date[] {
-  if (range === "90d") {
-    return Array.from({ length: 90 }, (_, index) => new Date(now.getTime() - (89 - index) * DAY_MS));
+  if (range === "90d" || range === "180d") {
+    const length = range === "90d" ? 90 : 180;
+    return Array.from({ length }, (_, index) => new Date(now.getTime() - (length - 1 - index) * DAY_MS));
   }
 
   const targets: Date[] = [];
@@ -70,10 +71,7 @@ export class HistoryMonitor {
       const latestBlock = await this.client.getBlock({ blockTag: "latest" });
       const latest = { number: latestBlock.number, timestamp: latestBlock.timestamp };
       const now = new Date(Number(latest.timestamp) * 1_000);
-      const ranges: HistoryRange[] = ["90d", "monthly"];
-
-      for (const range of ranges) {
-        const points = await parallelMap(historyTargets(range, now), 1, async (target): Promise<HistoryPoint> => {
+      const dailyPoints = await parallelMap(historyTargets("180d", now), 1, async (target): Promise<HistoryPoint> => {
           const block = await findBlockNearTimestamp(this.client, BigInt(Math.floor(target.getTime() / 1_000)), latest);
           const balance = await readUsdcAtBlock(this.client, this.config, pocket, block.number);
           await new Promise((resolve) => setTimeout(resolve, 100));
@@ -83,17 +81,25 @@ export class HistoryMonitor {
             balanceUsdc: formatUnits(balance, 6),
             utilizationPercent: Number((balance * 1_000_000n) / this.config.limitRaw) / 10_000,
           };
-        });
-        this.series.set(range, {
-          range,
-          interval: range === "90d" ? "daily" : "monthly",
-          generatedAt: new Date().toISOString(),
-          limitUsdc: formatUnits(this.config.limitRaw, 6),
-          points,
-        });
-      }
+      });
+      const monthlyPoints = await parallelMap(historyTargets("monthly", now), 1, async (target): Promise<HistoryPoint> => {
+        const block = await findBlockNearTimestamp(this.client, BigInt(Math.floor(target.getTime() / 1_000)), latest);
+        const balance = await readUsdcAtBlock(this.client, this.config, pocket, block.number);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return {
+          timestamp: new Date(Number(block.timestamp) * 1_000).toISOString(),
+          blockNumber: block.number.toString(),
+          balanceUsdc: formatUnits(balance, 6),
+          utilizationPercent: Number((balance * 1_000_000n) / this.config.limitRaw) / 10_000,
+        };
+      });
+      const generatedAt = new Date().toISOString();
+      const base = { generatedAt, limitUsdc: formatUnits(this.config.limitRaw, 6) };
+      this.series.set("180d", { ...base, range: "180d", interval: "daily", points: dailyPoints });
+      this.series.set("90d", { ...base, range: "90d", interval: "daily", points: dailyPoints.slice(-90) });
+      this.series.set("monthly", { ...base, range: "monthly", interval: "monthly", points: monthlyPoints });
       delete this.lastError;
-      console.log(JSON.stringify({ event: "history_loaded", dailyPoints: this.series.get("90d")?.points.length, monthlyPoints: this.series.get("monthly")?.points.length }));
+      console.log(JSON.stringify({ event: "history_loaded", dailyPoints: dailyPoints.length, monthlyPoints: monthlyPoints.length }));
     } catch (error) {
       const message = safeErrorMessage(error);
       this.lastError = { message, at: new Date().toISOString() };

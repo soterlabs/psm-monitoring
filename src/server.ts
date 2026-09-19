@@ -100,7 +100,8 @@ const server = createServer((request, response) => {
     return send(response, monitor.snapshot ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({ fresh, snapshot: monitor.snapshot ?? null, error: monitor.lastError ?? null })}\n`);
   }
   if (path === "/api/history") {
-    const range = url.searchParams.get("range") === "monthly" ? "monthly" : "90d";
+    const requested = url.searchParams.get("range");
+    const range = requested === "monthly" || requested === "180d" ? requested : "90d";
     return send(response, 200, "application/json; charset=utf-8", `${JSON.stringify({
       loading: history.loading,
       series: history.series.get(range) ?? null,
@@ -108,7 +109,8 @@ const server = createServer((request, response) => {
     })}\n`);
   }
   if (path === "/api/direct-exposure") {
-    const range = url.searchParams.get("range") === "monthly" ? "monthly" : "90d";
+    const requested = url.searchParams.get("range");
+    const range = requested === "monthly" || requested === "ytd" ? requested : "90d";
     return send(response, directExposure.series.has(range) ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({
       loading: directExposure.loading,
       series: directExposure.series.get(range) ?? null,

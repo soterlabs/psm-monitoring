@@ -33,7 +33,7 @@ Threshold percentages and the limit are environment-configurable. Changing them 
 ## Delivery and reliability
 
 - Dashboard and `/api/status` expose the latest result.
-- `/api/history` and the dashboard chart expose daily snapshots for 90 days and monthly snapshots from January 2025 onward. They are reconstructed from historical Ethereum state every six hours, so the RPC must support archive reads.
+- `/api/history` and the dashboard chart expose 90- and 180-day daily snapshots plus monthly snapshots from January 2025 onward. They are reconstructed from historical Ethereum state every six hours, so the RPC must support archive reads. The same page shows SDE daily history from January 2026 and month-end points.
 - `/metrics` provides balance, limit, utilization, freshness, last-success time, and RPC-error metrics for external alerting.
 - An optional webhook sends state-change, recovery, and hourly reminder notifications.
 - A failed RPC poll preserves the last good value, records the error, and retries on the next interval.

@@ -42,7 +42,7 @@ for (let month = 1; month <= 8; month += 1) {
   const key = `2026-${String(month).padStart(2, "0")}`;
   for (const prime of primes) {
     const path = resolve(settlementRoot, prime, key, "provenance.json");
-    addResult(prime, JSON.parse(readFileSync(path, "utf8")), month >= 6);
+    addResult(prime, JSON.parse(readFileSync(path, "utf8")), true);
   }
 }
 

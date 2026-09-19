@@ -12,6 +12,14 @@ describe("historyTargets", () => {
     assert.equal(targets[0]?.toISOString(), "2026-06-22T12:00:00.000Z");
   });
 
+  it("returns 180 daily targets when requested", () => {
+    const now = new Date("2026-09-19T12:00:00Z");
+    const targets = historyTargets("180d", now);
+    assert.equal(targets.length, 180);
+    assert.equal(targets.at(-1)?.toISOString(), now.toISOString());
+    assert.equal(targets[0]?.toISOString(), "2026-03-24T12:00:00.000Z");
+  });
+
   it("returns monthly targets from January 2025 plus the latest point", () => {
     const targets = historyTargets("monthly", now);
     assert.equal(targets.length, 22);
