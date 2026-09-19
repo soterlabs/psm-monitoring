@@ -1,11 +1,16 @@
 import { createServer, type ServerResponse } from "node:http";
+import { getAddress } from "viem";
 import { loadConfig } from "./config.js";
 import { makeClient } from "./chain.js";
 import { dashboardHtml } from "./dashboard.js";
 import { Monitor } from "./monitor.js";
+import { HistoryMonitor } from "./history.js";
 
 const config = loadConfig();
-const monitor = new Monitor(makeClient(config), config);
+const client = makeClient(config);
+const monitor = new Monitor(client, config);
+const history = new HistoryMonitor(client, config);
+let historyWaitTimer: NodeJS.Timeout | undefined;
 
 function send(response: ServerResponse, status: number, contentType: string, body: string): void {
   response.writeHead(status, {
@@ -49,7 +54,8 @@ function metrics(): string {
 }
 
 const server = createServer((request, response) => {
-  const path = new URL(request.url ?? "/", "http://localhost").pathname;
+  const url = new URL(request.url ?? "/", "http://localhost");
+  const path = url.pathname;
   if (request.method !== "GET") return send(response, 405, "text/plain; charset=utf-8", "Method not allowed\n");
   if (path === "/") return send(response, 200, "text/html; charset=utf-8", dashboardHtml);
   if (path === "/healthz") return send(response, 200, "application/json; charset=utf-8", '{"status":"alive"}\n');
@@ -61,6 +67,14 @@ const server = createServer((request, response) => {
     const fresh = monitor.isFresh();
     return send(response, monitor.snapshot ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({ fresh, snapshot: monitor.snapshot ?? null, error: monitor.lastError ?? null })}\n`);
   }
+  if (path === "/api/history") {
+    const range = url.searchParams.get("range") === "monthly" ? "monthly" : "90d";
+    return send(response, 200, "application/json; charset=utf-8", `${JSON.stringify({
+      loading: history.loading,
+      series: history.series.get(range) ?? null,
+      error: history.lastError ?? null,
+    })}\n`);
+  }
   if (path === "/metrics") return send(response, 200, "text/plain; version=0.0.4; charset=utf-8", metrics());
   return send(response, 404, "text/plain; charset=utf-8", "Not found\n");
 });
@@ -69,11 +83,24 @@ await monitor.poll();
 monitor.start();
 server.listen(config.port, "0.0.0.0", () => {
   console.log(JSON.stringify({ event: "server_started", port: config.port }));
+  const startHistory = (): void => {
+    if (monitor.snapshot) {
+      history.start(getAddress(monitor.snapshot.pocketAddress));
+      if (historyWaitTimer) clearInterval(historyWaitTimer);
+    }
+  };
+  startHistory();
+  if (!monitor.snapshot) {
+    historyWaitTimer = setInterval(startHistory, 10_000);
+    historyWaitTimer.unref();
+  }
 });
 
 function shutdown(signal: string): void {
   console.log(JSON.stringify({ event: "shutdown", signal }));
   monitor.stop();
+  history.stop();
+  if (historyWaitTimer) clearInterval(historyWaitTimer);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10_000).unref();
 }

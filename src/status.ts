@@ -4,14 +4,14 @@ import type { BalanceReading, Level, StatusSnapshot } from "./types.js";
 export function determineLevel(
   balance: bigint,
   limit: bigint,
-  warningPercent: number,
-  criticalPercent: number,
+  yellowPercent: number,
+  orangePercent: number,
 ): Level {
-  if (balance >= limit) return "exceeded";
+  if (balance >= limit) return "healthy";
   const basisPoints = (balance * 10_000n) / limit;
-  if (basisPoints >= BigInt(Math.round(criticalPercent * 100))) return "critical";
-  if (basisPoints >= BigInt(Math.round(warningPercent * 100))) return "warning";
-  return "ok";
+  if (basisPoints >= BigInt(Math.round(yellowPercent * 100))) return "warning";
+  if (basisPoints >= BigInt(Math.round(orangePercent * 100))) return "critical";
+  return "low";
 }
 
 function decimal(raw: bigint): string {
@@ -21,12 +21,12 @@ function decimal(raw: bigint): string {
 export function buildSnapshot(
   reading: BalanceReading,
   limit: bigint,
-  warningPercent: number,
-  criticalPercent: number,
+  yellowPercent: number,
+  orangePercent: number,
 ): StatusSnapshot {
   const remaining = limit - reading.totalBalanceRaw;
   return {
-    status: determineLevel(reading.totalBalanceRaw, limit, warningPercent, criticalPercent),
+    status: determineLevel(reading.totalBalanceRaw, limit, yellowPercent, orangePercent),
     checkedAt: reading.checkedAt,
     blockNumber: reading.blockNumber,
     blockTimestamp: reading.blockTimestamp,
@@ -40,7 +40,7 @@ export function buildSnapshot(
     limitUsdc: decimal(limit),
     remainingUsdc: decimal(remaining),
     utilizationPercent: Number((reading.totalBalanceRaw * 1_000_000n) / limit) / 10_000,
-    warningPercent,
-    criticalPercent,
+    yellowPercent,
+    orangePercent,
   };
 }

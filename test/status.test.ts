@@ -5,15 +5,15 @@ import { buildSnapshot, determineLevel } from "../src/status.js";
 const limit = 4_000_000_000_000_000n;
 
 describe("determineLevel", () => {
-  it("uses exact warning, critical, and exceeded boundaries", () => {
-    assert.equal(determineLevel(3_599_999_999_999_999n, limit, 90, 95), "ok");
-    assert.equal(determineLevel(3_600_000_000_000_000n, limit, 90, 95), "warning");
-    assert.equal(determineLevel(3_800_000_000_000_000n, limit, 90, 95), "critical");
-    assert.equal(determineLevel(limit, limit, 90, 95), "exceeded");
+  it("uses low, orange, yellow, and healthy boundaries", () => {
+    assert.equal(determineLevel(3_599_999_999_999_999n, limit, 95, 90), "low");
+    assert.equal(determineLevel(3_600_000_000_000_000n, limit, 95, 90), "critical");
+    assert.equal(determineLevel(3_800_000_000_000_000n, limit, 95, 90), "warning");
+    assert.equal(determineLevel(limit, limit, 95, 90), "healthy");
   });
 
   it("does not lose precision for large token balances", () => {
-    assert.equal(determineLevel(limit + 1n, limit, 90, 95), "exceeded");
+    assert.equal(determineLevel(limit + 1n, limit, 95, 90), "healthy");
   });
 });
 
@@ -30,8 +30,8 @@ describe("buildSnapshot", () => {
       pocketBalanceRaw: 4_000_000_000_000_001n,
       psmBalanceRaw: 2n,
       totalBalanceRaw: 4_000_000_000_000_003n,
-    }, limit, 90, 95);
-    assert.equal(snapshot.status, "exceeded");
+    }, limit, 95, 90);
+    assert.equal(snapshot.status, "healthy");
     assert.equal(snapshot.totalBalanceUsdc, "4000000000.000003");
     assert.equal(snapshot.remainingUsdc, "-0.000003");
     assert.equal(snapshot.utilizationPercent, 100);

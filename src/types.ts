@@ -1,4 +1,4 @@
-export const levels = ["ok", "warning", "critical", "exceeded"] as const;
+export const levels = ["healthy", "warning", "critical", "low"] as const;
 export type Level = (typeof levels)[number];
 
 export interface BalanceReading {
@@ -29,6 +29,23 @@ export interface StatusSnapshot {
   limitUsdc: string;
   remainingUsdc: string;
   utilizationPercent: number;
-  warningPercent: number;
-  criticalPercent: number;
+  yellowPercent: number;
+  orangePercent: number;
+}
+
+export type HistoryRange = "90d" | "monthly";
+
+export interface HistoryPoint {
+  timestamp: string;
+  blockNumber: string;
+  balanceUsdc: string;
+  utilizationPercent: number;
+}
+
+export interface HistorySeries {
+  range: HistoryRange;
+  interval: "daily" | "monthly";
+  generatedAt: string;
+  limitUsdc: string;
+  points: HistoryPoint[];
 }

@@ -2,6 +2,7 @@ import type { Config } from "./config.js";
 import { readBalance, type makeClient } from "./chain.js";
 import { buildSnapshot } from "./status.js";
 import type { Level, StatusSnapshot } from "./types.js";
+import { safeErrorMessage } from "./errors.js";
 
 type Client = ReturnType<typeof makeClient>;
 
@@ -22,15 +23,15 @@ export class Monitor {
       const next = buildSnapshot(
         reading,
         this.config.limitRaw,
-        this.config.warningPercent,
-        this.config.criticalPercent,
+        this.config.yellowPercent,
+        this.config.orangePercent,
       );
       this.snapshot = next;
       delete this.lastError;
       console.log(JSON.stringify({ event: "balance_checked", ...next }));
       await this.maybeAlert(next);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = safeErrorMessage(error);
       this.lastError = { message, at: new Date().toISOString() };
       console.error(JSON.stringify({ event: "poll_failed", message, at: this.lastError.at }));
     } finally {
@@ -54,15 +55,15 @@ export class Monitor {
   private async maybeAlert(snapshot: StatusSnapshot): Promise<void> {
     if (!this.config.alertWebhookUrl) return;
     const now = Date.now();
-    const isAlert = snapshot.status !== "ok";
+    const isAlert = snapshot.status !== "healthy";
     const changed = this.lastAlert?.level !== snapshot.status;
     const reminderDue = !this.lastAlert || now - this.lastAlert.at >= this.config.alertReminderMs;
     if (!changed && !reminderDue) return;
     if (!isAlert && !this.lastAlert) return;
 
     const message = isAlert
-      ? `[PSM ${snapshot.status.toUpperCase()}] ${snapshot.totalBalanceUsdc} USDC (${snapshot.utilizationPercent.toFixed(2)}%) of ${snapshot.limitUsdc} limit.`
-      : `[PSM RECOVERED] ${snapshot.totalBalanceUsdc} USDC (${snapshot.utilizationPercent.toFixed(2)}%) of ${snapshot.limitUsdc} limit.`;
+      ? `[PSM ${snapshot.status.toUpperCase()}] ${snapshot.totalBalanceUsdc} USDC (${snapshot.utilizationPercent.toFixed(2)}%) of ${snapshot.limitUsdc} target.`
+      : `[PSM HEALTHY] ${snapshot.totalBalanceUsdc} USDC (${snapshot.utilizationPercent.toFixed(2)}%) of ${snapshot.limitUsdc} target.`;
     try {
       const response = await fetch(this.config.alertWebhookUrl, {
         method: "POST",
@@ -75,7 +76,7 @@ export class Monitor {
     } catch (error) {
       console.error(JSON.stringify({
         event: "alert_failed",
-        message: error instanceof Error ? error.message : String(error),
+        message: safeErrorMessage(error),
         at: new Date().toISOString(),
       }));
     }

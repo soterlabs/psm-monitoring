@@ -10,12 +10,14 @@ The service reads the PSM's configured `pocket()` and `gem()` on-chain, verifies
 USDC.balanceOf(pocket) + USDC.balanceOf(PSM)
 ```
 
-It compares that balance with a 4 billion USDC operational limit. Defaults are:
+It compares that balance with a 4 billion USDC minimum target. Defaults are:
 
-- `ok`: below 90%
-- `warning`: 90% to below 95%
-- `critical`: 95% to below 100%
-- `exceeded`: 100% or more
+- `healthy` (green): 100% or more
+- `warning` (yellow): 95% to below 100%
+- `critical` (orange): 90% to below 95%
+- `low` (red): below 90%
+
+The dashboard also charts daily on-chain snapshots for the last 90 days and monthly snapshots from January 2025 onward. History is reconstructed from archive RPC reads at startup and refreshed every six hours.
 
 See [MONITORING_PLAN.md](MONITORING_PLAN.md) for the monitoring and response plan.
 
@@ -23,6 +25,7 @@ See [MONITORING_PLAN.md](MONITORING_PLAN.md) for the monitoring and response pla
 
 - `/` — live dashboard, refreshed every 30 seconds
 - `/api/status` — machine-readable status and most recent RPC error
+- `/api/history?range=90d` — daily historical series (`range=monthly` for January 2025 onward)
 - `/metrics` — Prometheus metrics
 - `/healthz` — process liveness (Railway health check)
 - `/readyz` — `200` only when an on-chain reading is fresh
@@ -66,9 +69,9 @@ The webhook receives an alert on entry into a warning state, on severity changes
 | `ETH_RPC` | yes | — | Ethereum mainnet JSON-RPC URL |
 | `PSM_ADDRESS` | no | `0xf6e72...53042` | LitePSM contract |
 | `USDC_ADDRESS` | no | `0xA0b869...6eB48` | Expected gem/token |
-| `LIMIT_USDC` | no | `4000000000` | Operational limit |
-| `WARNING_PERCENT` | no | `90` | Warning threshold |
-| `CRITICAL_PERCENT` | no | `95` | Critical threshold |
+| `LIMIT_USDC` | no | `4000000000` | Minimum healthy target |
+| `YELLOW_PERCENT` | no | `95` | Yellow threshold below target |
+| `ORANGE_PERCENT` | no | `90` | Orange threshold; lower values are red |
 | `POLL_INTERVAL_SECONDS` | no | `60` | On-chain polling cadence; minimum 10 |
 | `STALE_AFTER_SECONDS` | no | `180` | Reading age that fails readiness |
 | `ALERT_WEBHOOK_URL` | no | — | Alert destination |

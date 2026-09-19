@@ -7,8 +7,8 @@ export interface Config {
   usdcAddress: Address;
   limitRaw: bigint;
   limitUsdc: string;
-  warningPercent: number;
-  criticalPercent: number;
+  yellowPercent: number;
+  orangePercent: number;
   pollIntervalMs: number;
   staleAfterMs: number;
   alertReminderMs: number;
@@ -39,10 +39,10 @@ export function loadConfig(): Config {
     throw new Error("ETH_RPC must be a valid URL");
   }
 
-  const warningPercent = numberFromEnv("WARNING_PERCENT", 90, 0);
-  const criticalPercent = numberFromEnv("CRITICAL_PERCENT", 95, 0);
-  if (warningPercent >= criticalPercent || criticalPercent >= 100) {
-    throw new Error("Thresholds must satisfy WARNING_PERCENT < CRITICAL_PERCENT < 100");
+  const yellowPercent = numberFromEnv("YELLOW_PERCENT", 95, 0);
+  const orangePercent = numberFromEnv("ORANGE_PERCENT", 90, 0);
+  if (orangePercent >= yellowPercent || yellowPercent >= 100) {
+    throw new Error("Thresholds must satisfy ORANGE_PERCENT < YELLOW_PERCENT < 100");
   }
 
   const limitUsdc = process.env.LIMIT_USDC ?? "4000000000";
@@ -70,8 +70,8 @@ export function loadConfig(): Config {
     usdcAddress: addressFromEnv("USDC_ADDRESS", "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
     limitRaw,
     limitUsdc,
-    warningPercent,
-    criticalPercent,
+    yellowPercent,
+    orangePercent,
     pollIntervalMs: numberFromEnv("POLL_INTERVAL_SECONDS", 60, 10) * 1_000,
     staleAfterMs: numberFromEnv("STALE_AFTER_SECONDS", 180, 30) * 1_000,
     alertReminderMs: numberFromEnv("ALERT_REMINDER_SECONDS", 3_600, 60) * 1_000,
