@@ -17,7 +17,7 @@ It compares that balance with a 4 billion USDC minimum target. Defaults are:
 - `critical` (orange): 90% to below 95%
 - `low` (red): below 90%
 
-The dashboard charts daily on-chain snapshots for the last 7, 30, 90, or 180 days and monthly snapshots from January 2025 onward. History is reconstructed from archive RPC reads at startup and refreshed every six hours.
+The dashboard charts daily on-chain snapshots for the last 7, 30, 90, or 180 days and monthly snapshots from January 2025 onward. A Railway cron service refreshes both chart datasets every day at 02:15 UTC and upserts them into Railway Postgres. On an empty database, the web service reconstructs and seeds the history automatically; archive RPC reads remain the fallback if storage is unavailable.
 
 The same dashboard also shows USDC-equivalent capacity across Grove and Spark SDE venues, both per venue and in aggregate. It includes daily history from January 2026, month-end history, and live chain-by-chain verification of USDC held by the Base, Arbitrum, Optimism, and Unichain PSM3 contracts. See [DIRECT_EXPOSURE.md](DIRECT_EXPOSURE.md) for its scope, calculation, and liquidity caveats.
 
@@ -58,7 +58,7 @@ npm run build
 
 ## Deploy to Railway
 
-The repository includes a production `Dockerfile` and Railway infrastructure-as-code in `.railway/railway.ts`. Create a Railway service from this GitHub repository, set `ETH_RPC`, and run `railway config apply`. Railway supplies `PORT` automatically.
+The repository includes a production `Dockerfile` and Railway infrastructure-as-code in `.railway/railway.ts`. It declares the web service, a persistent Postgres database, and the `daily-snapshots` cron worker. Set `ETH_RPC` on the web service and run `railway config apply`; the worker references the same secret and runs `npm run cron` at 02:15 UTC. Railway supplies `PORT` automatically.
 
 Optional alerting works with generic JSON, Slack, or Discord webhooks:
 
@@ -87,6 +87,7 @@ The webhook receives an alert on entry into a warning state, on severity changes
 | `ARBITRUM_RPC` | yes for PSM3 verification | — | Arbitrum JSON-RPC URL |
 | `OPTIMISM_RPC` | yes for PSM3 verification | — | Optimism JSON-RPC URL |
 | `UNICHAIN_RPC` | yes for PSM3 verification | — | Unichain JSON-RPC URL |
+| `DATABASE_URL` | required for persistent history | — | Railway Postgres connection URL shared by the web and daily snapshot services |
 
 Secrets are runtime configuration only. `.env` files are ignored by git.
 

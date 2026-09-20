@@ -8,12 +8,14 @@ import { DirectExposureMonitor } from "./direct-exposure.js";
 import { Monitor } from "./monitor.js";
 import { HistoryMonitor } from "./history.js";
 import { Psm3Monitor } from "./psm3.js";
+import { SnapshotStore } from "./database.js";
 
 const config = loadConfig();
 const client = makeClient(config);
+const store = SnapshotStore.fromEnvironment();
 const monitor = new Monitor(client, config);
-const history = new HistoryMonitor(client, config);
-const directExposure = new DirectExposureMonitor();
+const history = new HistoryMonitor(client, config, store);
+const directExposure = new DirectExposureMonitor(store);
 const psm3 = new Psm3Monitor();
 let historyWaitTimer: NodeJS.Timeout | undefined;
 const soterLogo = readFileSync(new URL("../public/soter-labs.png", import.meta.url));
@@ -161,7 +163,10 @@ function shutdown(signal: string): void {
   directExposure.stop();
   psm3.stop();
   if (historyWaitTimer) clearInterval(historyWaitTimer);
-  server.close(() => process.exit(0));
+  server.close(() => {
+    if (store) void store.close().finally(() => process.exit(0));
+    else process.exit(0);
+  });
   setTimeout(() => process.exit(1), 10_000).unref();
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));
