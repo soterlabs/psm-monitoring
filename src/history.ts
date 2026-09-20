@@ -9,8 +9,8 @@ const DAY_MS = 86_400_000;
 const HISTORY_REFRESH_MS = 6 * 60 * 60 * 1_000;
 
 export function historyTargets(range: HistoryRange, now: Date): Date[] {
-  if (range === "90d" || range === "180d") {
-    const length = range === "90d" ? 90 : 180;
+  if (range !== "monthly") {
+    const length = { "7d": 7, "30d": 30, "90d": 90, "180d": 180 }[range];
     return Array.from({ length }, (_, index) => new Date(now.getTime() - (length - 1 - index) * DAY_MS));
   }
 
@@ -97,6 +97,8 @@ export class HistoryMonitor {
       const base = { generatedAt, limitUsdc: formatUnits(this.config.limitRaw, 6) };
       this.series.set("180d", { ...base, range: "180d", interval: "daily", points: dailyPoints });
       this.series.set("90d", { ...base, range: "90d", interval: "daily", points: dailyPoints.slice(-90) });
+      this.series.set("30d", { ...base, range: "30d", interval: "daily", points: dailyPoints.slice(-30) });
+      this.series.set("7d", { ...base, range: "7d", interval: "daily", points: dailyPoints.slice(-7) });
       this.series.set("monthly", { ...base, range: "monthly", interval: "monthly", points: monthlyPoints });
       delete this.lastError;
       console.log(JSON.stringify({ event: "history_loaded", dailyPoints: dailyPoints.length, monthlyPoints: monthlyPoints.length }));

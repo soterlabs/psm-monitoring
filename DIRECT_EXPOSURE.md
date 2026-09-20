@@ -26,7 +26,7 @@ PSM3 USDC = settlement sde_av − all named SDE venue values
 total capacity = canonical named venues + Spark PSM3 USDC
 ```
 
-The dashboard offers 90-day daily, year-to-date daily, and month-end views beginning in January 2026. A daily baseline through August 2026 is generated from canonical monthly settlement artifacts; the current and recent month-to-date values refresh every six hours from the public settlement API. Grove has an SDE pattern entry but no configured PSM3 position, so there is no empty Grove PSM3 row in the dashboard. Values are provisional USD estimates and may be restated by the settlement process.
+The dashboard offers 7-, 30-, and 90-day daily views, a year-to-date daily view, and month-end points beginning in January 2026. A daily baseline through August 2026 is generated from canonical monthly settlement artifacts; the current and recent month-to-date values refresh every six hours from the public settlement API. Grove has an SDE pattern entry but no configured PSM3 position, so there is no empty Grove PSM3 row in the dashboard. Values are provisional USD estimates and may be restated by the settlement process.
 
 The app separately verifies the current PSM3 number every five minutes by reading USDC `balanceOf(PSM3)`, Spark ALM `shares()`, and PSM3 `totalShares()` on all four L2s. This makes the current chain composition independently auditable without mixing newer on-chain readings into the older settlement-dated historical series.
 

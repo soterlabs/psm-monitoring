@@ -3,6 +3,13 @@ import { describe, it } from "node:test";
 import { historyTargets } from "../src/history.js";
 
 describe("historyTargets", () => {
+  it("returns short daily windows", () => {
+    const now = new Date("2026-09-19T12:00:00Z");
+    assert.equal(historyTargets("7d", now).length, 7);
+    assert.equal(historyTargets("30d", now).length, 30);
+    assert.equal(historyTargets("7d", now).at(-1)?.toISOString(), now.toISOString());
+  });
+
   const now = new Date("2026-09-19T12:00:00.000Z");
 
   it("returns 90 daily targets ending at the latest timestamp", () => {

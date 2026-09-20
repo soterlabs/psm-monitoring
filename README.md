@@ -17,7 +17,7 @@ It compares that balance with a 4 billion USDC minimum target. Defaults are:
 - `critical` (orange): 90% to below 95%
 - `low` (red): below 90%
 
-The dashboard charts daily on-chain snapshots for the last 90 or 180 days and monthly snapshots from January 2025 onward. History is reconstructed from archive RPC reads at startup and refreshed every six hours.
+The dashboard charts daily on-chain snapshots for the last 7, 30, 90, or 180 days and monthly snapshots from January 2025 onward. History is reconstructed from archive RPC reads at startup and refreshed every six hours.
 
 The same dashboard also shows USDC-equivalent capacity across Grove and Spark SDE venues, both per venue and in aggregate. It includes daily history from January 2026, month-end history, and live chain-by-chain verification of USDC held by the Base, Arbitrum, Optimism, and Unichain PSM3 contracts. See [DIRECT_EXPOSURE.md](DIRECT_EXPOSURE.md) for its scope, calculation, and liquidity caveats.
 
@@ -28,9 +28,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for a concise explanation of the pocket, 
 
 - `/` — live dashboard, refreshed every 30 seconds
 - `/api/status` — machine-readable status and most recent RPC error
-- `/api/history?range=90d` — daily history (`range=180d` or `range=monthly` are also available)
+- `/api/history?range=30d` — daily history (`7d`, `90d`, `180d`, and `monthly` are also available)
 - `/direct-exposure` — compatibility URL for the consolidated dashboard
-- `/api/direct-exposure?range=90d` — per-venue history (`range=ytd` for daily 2026 data or `range=monthly`)
+- `/api/direct-exposure?range=30d` — per-venue history (`7d`, `90d`, `ytd`, and `monthly` are also available)
 - `/api/psm3` — live PSM3 USDC reserves and Spark ownership by L2
 - `/metrics` — Prometheus metrics for LitePSM health and aggregate SDE capacity
 - `/healthz` — process liveness (Railway health check)

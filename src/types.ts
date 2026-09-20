@@ -33,7 +33,7 @@ export interface StatusSnapshot {
   orangePercent: number;
 }
 
-export type HistoryRange = "90d" | "180d" | "monthly";
+export type HistoryRange = "7d" | "30d" | "90d" | "180d" | "monthly";
 
 export interface HistoryPoint {
   timestamp: string;
@@ -50,7 +50,7 @@ export interface HistorySeries {
   points: HistoryPoint[];
 }
 
-export type DirectExposureRange = "90d" | "ytd" | "monthly";
+export type DirectExposureRange = "7d" | "30d" | "90d" | "ytd" | "monthly";
 
 export interface DirectExposureVenue {
   id: string;
