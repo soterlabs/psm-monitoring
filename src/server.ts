@@ -1,4 +1,5 @@
 import { createServer, type ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
 import { getAddress } from "viem";
 import { loadConfig } from "./config.js";
 import { makeClient } from "./chain.js";
@@ -15,11 +16,14 @@ const history = new HistoryMonitor(client, config);
 const directExposure = new DirectExposureMonitor();
 const psm3 = new Psm3Monitor();
 let historyWaitTimer: NodeJS.Timeout | undefined;
+const soterLogo = readFileSync(new URL("../public/soter-labs.png", import.meta.url));
+const brandFont = readFileSync(new URL("../public/deltha.otf", import.meta.url));
+const favicon = readFileSync(new URL("../public/favicon.svg", import.meta.url));
 
-function send(response: ServerResponse, status: number, contentType: string, body: string): void {
+function send(response: ServerResponse, status: number, contentType: string, body: string | Uint8Array, cacheControl = "no-store"): void {
   response.writeHead(status, {
     "content-type": contentType,
-    "cache-control": "no-store",
+    "cache-control": cacheControl,
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
@@ -88,6 +92,9 @@ const server = createServer((request, response) => {
   const url = new URL(request.url ?? "/", "http://localhost");
   const path = url.pathname;
   if (request.method !== "GET") return send(response, 405, "text/plain; charset=utf-8", "Method not allowed\n");
+  if (path === "/assets/soter-labs.png") return send(response, 200, "image/png", soterLogo, "public, max-age=31536000, immutable");
+  if (path === "/assets/deltha.otf") return send(response, 200, "font/otf", brandFont, "public, max-age=31536000, immutable");
+  if (path === "/favicon.svg") return send(response, 200, "image/svg+xml", favicon, "public, max-age=31536000, immutable");
   if (path === "/") return send(response, 200, "text/html; charset=utf-8", dashboardHtml);
   if (path === "/direct-exposure") return send(response, 200, "text/html; charset=utf-8", dashboardHtml);
   if (path === "/healthz") return send(response, 200, "application/json; charset=utf-8", '{"status":"alive"}\n');
