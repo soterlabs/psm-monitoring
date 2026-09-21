@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parsePrimeResult } from "../src/direct-exposure.js";
+import {
+  addBasinJtrsy,
+  parseBasinJtrsyHistory,
+  parsePrimeResult,
+} from "../src/direct-exposure.js";
 
 test("parsePrimeResult separates named venues from the PSM3 residual", () => {
   const result = parsePrimeResult("spark", {
@@ -29,4 +33,35 @@ test("parsePrimeResult excludes a venue removed from canonical SDE scope without
     "spark:S62": 10,
     "spark:psm3": 5,
   });
+});
+
+test("parseBasinJtrsyHistory reads dated Basin asset values", () => {
+  assert.deepEqual(
+    [...parseBasinJtrsyHistory({
+      data: [
+        { date: "2026-09-17", assets: "50150735.448587153026248652" },
+        { date: "2026-09-16", assets: "42500139.126589995942488851" },
+      ],
+    })],
+    [
+      ["2026-09-17", 50_150_735.44858715],
+      ["2026-09-16", 42_500_139.12659],
+    ],
+  );
+});
+
+test("addBasinJtrsy sums Basin into the existing JTRSY line and total", () => {
+  const original = [{
+    date: "2026-09-17",
+    totalUsd: 500,
+    venues: { "grove:E9": 300, "spark:psm3": 200 },
+  }];
+  const result = addBasinJtrsy(original, new Map([["2026-09-17", 50]]));
+
+  assert.deepEqual(result, [{
+    date: "2026-09-17",
+    totalUsd: 550,
+    venues: { "grove:E9": 350, "spark:psm3": 200 },
+  }]);
+  assert.deepEqual(original[0]?.venues, { "grove:E9": 300, "spark:psm3": 200 });
 });

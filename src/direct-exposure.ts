@@ -9,6 +9,10 @@ import type {
 import type { SnapshotStore } from "./database.js";
 
 const API_BASE = process.env.SETTLEMENT_API_URL ?? "https://settle-api-production.up.railway.app";
+const SKY_DATA_API_BASE = process.env.SKY_DATA_API_URL ?? "https://sky.data.blockanalitica.com/internal";
+const BASIN_JTRSY_ADDRESS = "0xf08943f817e1f902debc884c7b19ea5764594ac9";
+const GROVE_ALM_ADDRESS = "0x0dcd9298e163dfd3c0b5b00f0d9093c36e40a153";
+const JTRSY_VENUE_ID = "grove:E9";
 const REFRESH_MS = 6 * 60 * 60 * 1_000;
 const STORED_REFRESH_MS = 15 * 60 * 1_000;
 const DAY_MS = 86_400_000;
@@ -100,6 +104,15 @@ async function fetchJson(path: string): Promise<unknown> {
   return response.json();
 }
 
+async function fetchSkyDataJson(path: string): Promise<unknown> {
+  const response = await fetch(`${SKY_DATA_API_BASE}${path}`, {
+    headers: { accept: "application/json", "user-agent": "soterlabs-psm-monitor/1.0" },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!response.ok) throw new Error(`BA Labs Sky Data API request failed (${response.status})`);
+  return response.json();
+}
+
 async function loadPrimeResults(prime: "grove" | "spark", now: Date): Promise<unknown[]> {
   const end = new Date(now.getTime() - DAY_MS);
   const start = new Date(end.getTime() - 89 * DAY_MS);
@@ -131,15 +144,65 @@ function monthEnd(points: DirectExposurePoint[]): DirectExposurePoint[] {
   return [...months.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
+/** Extracts the USD asset value of Grove's Basin JTRSY allocation by date. */
+export function parseBasinJtrsyHistory(input: unknown): Map<string, number> {
+  const response = object(input);
+  const values = new Map<string, number>();
+  for (const rawDay of array(response?.data)) {
+    const day = object(rawDay);
+    if (!day || typeof day.date !== "string") continue;
+    const assets = finite(day.assets);
+    if (assets < 0) throw new Error("BA Labs Sky Data API returned a negative Basin JTRSY value");
+    values.set(day.date, assets);
+  }
+  if (values.size === 0) throw new Error("BA Labs Sky Data API returned no Basin JTRSY history");
+  return values;
+}
+
+/** Adds the separate Basin holding into the existing Grove JTRSY chart line and total. */
+export function addBasinJtrsy(
+  points: DirectExposurePoint[],
+  basinByDate: Map<string, number>,
+): DirectExposurePoint[] {
+  return points.map((point) => {
+    const basin = basinByDate.get(point.date);
+    if (basin === undefined) return point;
+    return {
+      ...point,
+      totalUsd: point.totalUsd + basin,
+      venues: {
+        ...point.venues,
+        [JTRSY_VENUE_ID]: (point.venues[JTRSY_VENUE_ID] ?? 0) + basin,
+      },
+    };
+  });
+}
+
+async function loadBasinJtrsyHistory(now: Date): Promise<Map<string, number>> {
+  const start = Date.UTC(2026, 0, 1);
+  const daysAgo = Math.max(90, Math.ceil((now.getTime() - start) / DAY_MS) + 7);
+  const query = new URLSearchParams({
+    wallet_address: GROVE_ALM_ADDRESS,
+    network: "ethereum",
+    days_ago: String(daysAgo),
+  });
+  const response = await fetchSkyDataJson(
+    `/allocations/${BASIN_JTRSY_ADDRESS}/historic/?${query.toString()}`,
+  );
+  return parseBasinJtrsyHistory(response);
+}
+
 export async function loadDirectExposurePoints(now = new Date()): Promise<DirectExposurePoint[]> {
-  const [groveDocs, sparkDocs] = await Promise.all([
+  const [groveDocs, sparkDocs, basinByDate] = await Promise.all([
     loadPrimeResults("grove", now),
     loadPrimeResults("spark", now),
+    loadBasinJtrsyHistory(now),
   ]);
   const live = mergePrimeDays(combineDocuments("grove", groveDocs), combineDocuments("spark", sparkDocs));
   const byDate = new Map<string, DirectExposurePoint>(sdeBaselinePoints.map((point) => [point.date, point]));
   for (const point of live) byDate.set(point.date, point);
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  const canonical = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  return addBasinJtrsy(canonical, basinByDate);
 }
 
 export class DirectExposureMonitor {

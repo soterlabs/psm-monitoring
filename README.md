@@ -83,6 +83,7 @@ The webhook receives an alert on entry into a warning state, on severity changes
 | `ALERT_WEBHOOK_URL` | no | — | Alert destination |
 | `ALERT_REMINDER_SECONDS` | no | `3600` | Re-alert interval; minimum 60 |
 | `SETTLEMENT_API_URL` | no | public settle API | Override the SDE daily-data service |
+| `SKY_DATA_API_URL` | no | BA Labs public Sky Data API | Override the Basin JTRSY history service |
 | `BASE_RPC` | yes for PSM3 verification | — | Base JSON-RPC URL |
 | `ARBITRUM_RPC` | yes for PSM3 verification | — | Arbitrum JSON-RPC URL |
 | `OPTIMISM_RPC` | yes for PSM3 verification | — | Optimism JSON-RPC URL |
