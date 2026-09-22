@@ -50,7 +50,7 @@ export interface HistorySeries {
   points: HistoryPoint[];
 }
 
-export type DirectExposureRange = "7d" | "30d" | "90d" | "ytd" | "monthly";
+export type DirectExposureRange = "7d" | "30d" | "90d" | "ytd" | "all" | "monthly";
 
 export interface DirectExposureVenue {
   id: string;

@@ -33,7 +33,7 @@ Threshold percentages and the limit are environment-configurable. Changing them 
 ## Delivery and reliability
 
 - Dashboard and `/api/status` expose the latest result.
-- `/api/history` and the dashboard chart expose 7-, 30-, 90-, and 180-day daily snapshots plus monthly snapshots from January 2025 onward. The same page shows equivalent short ranges, SDE daily history from January 2026, and month-end points.
+- `/api/history` and the dashboard chart expose 7-, 30-, 90-, and 180-day daily snapshots plus monthly snapshots from January 2025 onward. The same page shows equivalent short ranges, reviewed Atlas-effective SDE daily history from January 2025 (zero before the first designation on 23 October 2025), and month-end points.
 - Railway's `daily-snapshots` cron runs at 02:15 UTC. It rebuilds both the LitePSM and SDE time series, then transactionally upserts date-keyed snapshots into Railway Postgres; reruns are idempotent. The web service reads this durable history every 15 minutes.
 - An empty database is seeded automatically by the web service. If Postgres is unavailable, the dashboard falls back to live reconstruction instead of losing history availability. Ethereum reconstruction requires an archive-capable RPC.
 - `/metrics` provides balance, limit, utilization, freshness, last-success time, and RPC-error metrics for external alerting.

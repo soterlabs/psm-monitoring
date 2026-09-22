@@ -19,7 +19,7 @@ It compares that balance with a 4 billion USDC minimum target. Defaults are:
 
 The dashboard charts daily on-chain snapshots for the last 7, 30, 90, or 180 days and monthly snapshots from January 2025 onward. A Railway cron service refreshes both chart datasets every day at 02:15 UTC and upserts them into Railway Postgres. On an empty database, the web service reconstructs and seeds the history automatically; archive RPC reads remain the fallback if storage is unavailable.
 
-The same dashboard also shows USDC-equivalent capacity across Grove and Spark SDE venues, both per venue and in aggregate. It includes daily history from January 2026, month-end history, and live chain-by-chain verification of USDC held by the Base, Arbitrum, Optimism, and Unichain PSM3 contracts. See [DIRECT_EXPOSURE.md](DIRECT_EXPOSURE.md) for its scope, calculation, and liquidity caveats.
+The same dashboard also shows USDC-equivalent capacity across Grove and Spark SDE venues, both per venue and in aggregate. Its reviewed daily history begins in January 2025, is zero before the first SDE designation on 23 October 2025, and applies each later Atlas scope transition on its effective date. The immutable data is kept in [`src/data/sde-history.json`](src/data/sde-history.json); the live service extends it after the reviewed cutoff. The dashboard also provides month-end history and live chain-by-chain verification of USDC held by the Base, Arbitrum, Optimism, and Unichain PSM3 contracts. See [DIRECT_EXPOSURE.md](DIRECT_EXPOSURE.md) for its scope, calculation, and liquidity caveats.
 
 See [MONITORING_PLAN.md](MONITORING_PLAN.md) for the monitoring and response plan.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for a concise explanation of the pocket, LitePSM, USDS PSM Wrapper, and DAI–USDS converter.
@@ -30,7 +30,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for a concise explanation of the pocket, 
 - `/api/status` — machine-readable status and most recent RPC error
 - `/api/history?range=30d` — daily history (`7d`, `90d`, `180d`, and `monthly` are also available)
 - `/direct-exposure` — compatibility URL for the consolidated dashboard
-- `/api/direct-exposure?range=30d` — per-venue history (`7d`, `90d`, `ytd`, and `monthly` are also available)
+- `/api/direct-exposure?range=30d` — per-venue history (`7d`, `90d`, `ytd`, `all`, and `monthly` are also available)
 - `/api/psm3` — live PSM3 USDC reserves and Spark ownership by L2
 - `/metrics` — Prometheus metrics for LitePSM health and aggregate SDE capacity
 - `/healthz` — process liveness (Railway health check)

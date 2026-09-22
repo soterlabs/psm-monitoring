@@ -17,9 +17,10 @@ const REFRESH_MS = 6 * 60 * 60 * 1_000;
 const STORED_REFRESH_MS = 15 * 60 * 1_000;
 const DAY_MS = 86_400_000;
 const ACTIVE_OR_HISTORICAL_VENUE_IDS = new Set(["grove:E8", "grove:E9", "grove:E10", "spark:S21", "spark:S24", "spark:S62"]);
+const HISTORICAL_THROUGH = sdeBaselinePoints.at(-1)?.date ?? "";
 
 export const directExposureVenues: DirectExposureVenue[] = [
-  { id: "grove:E8", prime: "Grove", label: "JAAA (historical, capped)", assetKind: "treasury", conversion: "Fund redemption to USDC" },
+  { id: "grove:E8", prime: "Grove", label: "JAAA (historical)", assetKind: "treasury", conversion: "Fund redemption to USDC" },
   { id: "grove:E9", prime: "Grove", label: "JTRSY", assetKind: "treasury", conversion: "Fund redemption to USDC" },
   { id: "grove:E10", prime: "Grove", label: "BUIDL-I", assetKind: "treasury", conversion: "Fund redemption to USDC" },
   { id: "spark:S21", prime: "Spark", label: "USTB", assetKind: "treasury", conversion: "Fund redemption to USDC" },
@@ -178,6 +179,15 @@ export function addBasinJtrsy(
   });
 }
 
+/** Immutable reviewed history wins through its cutoff; stored/live data extends it. */
+export function mergeHistoricalExposure(points: DirectExposurePoint[]): DirectExposurePoint[] {
+  const byDate = new Map<string, DirectExposurePoint>(sdeBaselinePoints.map((point) => [point.date, point]));
+  for (const point of points) {
+    if (point.date > HISTORICAL_THROUGH) byDate.set(point.date, point);
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
 async function loadBasinJtrsyHistory(now: Date): Promise<Map<string, number>> {
   const start = Date.UTC(2026, 0, 1);
   const daysAgo = Math.max(90, Math.ceil((now.getTime() - start) / DAY_MS) + 7);
@@ -199,10 +209,8 @@ export async function loadDirectExposurePoints(now = new Date()): Promise<Direct
     loadBasinJtrsyHistory(now),
   ]);
   const live = mergePrimeDays(combineDocuments("grove", groveDocs), combineDocuments("spark", sparkDocs));
-  const byDate = new Map<string, DirectExposurePoint>(sdeBaselinePoints.map((point) => [point.date, point]));
-  for (const point of live) byDate.set(point.date, point);
-  const canonical = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
-  return addBasinJtrsy(canonical, basinByDate);
+  const canonical = mergeHistoricalExposure(live);
+  return addBasinJtrsy(canonical, new Map([...basinByDate].filter(([date]) => date > HISTORICAL_THROUGH)));
 }
 
 export class DirectExposureMonitor {
@@ -233,7 +241,7 @@ export class DirectExposureMonitor {
         try {
           const stored = await this.store.loadExposure();
           if (stored?.points.length) {
-            this.setSeries(stored.points, stored.generatedAt);
+            this.setSeries(mergeHistoricalExposure(stored.points), stored.generatedAt);
             delete this.lastError;
             console.log(JSON.stringify({ event: "direct_exposure_loaded_from_database", asOf: stored.points.at(-1)?.date, points: stored.points.length }));
             return;
@@ -268,12 +276,13 @@ export class DirectExposureMonitor {
     if (!asOf) throw new Error("No shared Grove and Spark SDE dates are available");
     const cutoff = new Date(`${asOf}T00:00:00Z`).getTime() - 89 * DAY_MS;
     const daily = all.filter((point) => new Date(`${point.date}T00:00:00Z`).getTime() >= cutoff);
-    const monthly = monthEnd(all.filter((point) => point.date >= "2026-01-01"));
+    const monthly = monthEnd(all.filter((point) => point.date >= "2025-01-01"));
     const base = { generatedAt, asOf, provisional: true, unit: "USD (USDC-equivalent)" as const, venues: directExposureVenues };
     this.series.set("90d", { ...base, range: "90d", interval: "daily", points: daily });
     this.series.set("30d", { ...base, range: "30d", interval: "daily", points: daily.slice(-30) });
     this.series.set("7d", { ...base, range: "7d", interval: "daily", points: daily.slice(-7) });
     this.series.set("ytd", { ...base, range: "ytd", interval: "daily", points: all.filter((point) => point.date >= "2026-01-01") });
+    this.series.set("all", { ...base, range: "all", interval: "daily", points: all.filter((point) => point.date >= "2025-01-01") });
     this.series.set("monthly", { ...base, range: "monthly", interval: "monthly", points: monthly });
     console.log(JSON.stringify({ event: "direct_exposure_loaded", asOf, dailyPoints: daily.length, ytdPoints: this.series.get("ytd")?.points.length, monthlyPoints: monthly.length }));
   }

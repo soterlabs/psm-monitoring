@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   addBasinJtrsy,
+  mergeHistoricalExposure,
   parseBasinJtrsyHistory,
   parsePrimeResult,
 } from "../src/direct-exposure.js";
+import { sdeBaselinePoints } from "../src/sde-baseline.js";
 
 test("parsePrimeResult separates named venues from the PSM3 residual", () => {
   const result = parsePrimeResult("spark", {
@@ -64,4 +66,29 @@ test("addBasinJtrsy sums Basin into the existing JTRSY line and total", () => {
     venues: { "grove:E9": 350, "spark:psm3": 200 },
   }]);
   assert.deepEqual(original[0]?.venues, { "grove:E9": 300, "spark:psm3": 200 });
+});
+
+test("reviewed SDE history is daily from January 2025 and applies Atlas scope dates", () => {
+  assert.equal(sdeBaselinePoints.length, 608);
+  assert.equal(sdeBaselinePoints[0]?.date, "2025-01-01");
+  assert.equal(sdeBaselinePoints.at(-1)?.date, "2026-08-31");
+  assert.equal(sdeBaselinePoints.find((point) => point.date === "2025-10-22")?.totalUsd, 0);
+  assert.ok((sdeBaselinePoints.find((point) => point.date === "2025-10-23")?.venues["grove:E8"] ?? 0) > 0);
+  assert.ok((sdeBaselinePoints.find((point) => point.date === "2026-03-11")?.venues["grove:E8"] ?? 0) > 0);
+  assert.equal(sdeBaselinePoints.find((point) => point.date === "2026-03-12")?.venues["grove:E8"], undefined);
+  assert.equal(sdeBaselinePoints.find((point) => point.date === "2026-05-25")?.venues["spark:S62"], 0);
+  assert.ok((sdeBaselinePoints.find((point) => point.date === "2026-05-26")?.venues["spark:S62"] ?? 0) > 0);
+  assert.ok((sdeBaselinePoints.find((point) => point.date === "2026-06-24")?.venues["spark:S24"] ?? 0) > 0);
+  assert.equal(sdeBaselinePoints.find((point) => point.date === "2026-06-25")?.venues["spark:S24"], undefined);
+});
+
+test("reviewed history cannot be overwritten but live data extends its cutoff", () => {
+  const historical = sdeBaselinePoints.find((point) => point.date === "2025-10-23");
+  assert.ok(historical);
+  const merged = mergeHistoricalExposure([
+    { date: "2025-10-23", totalUsd: 1, venues: { "grove:E8": 1 } },
+    { date: "2026-09-01", totalUsd: 2, venues: { "grove:E9": 2 } },
+  ]);
+  assert.deepEqual(merged.find((point) => point.date === "2025-10-23"), historical);
+  assert.deepEqual(merged.at(-1), { date: "2026-09-01", totalUsd: 2, venues: { "grove:E9": 2 } });
 });
