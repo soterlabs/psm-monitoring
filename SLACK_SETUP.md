@@ -41,7 +41,7 @@ The rules use the same Ethereum reading as the dashboard: canonical USDC held by
 | `< 3.85B` and `≥ 3.80B` | “Should be refilled urgently”; `@here` |
 | `< 3.80B` | 🚨 **ACTION NEEDED**; urgent refill; `@here` |
 
-The cron evaluates the state every ten minutes, sends immediately when the observed state changes, and repeats the active alert once per hour. It also sends an untagged informational note when the balance decreases by more than 10M USDC between consecutive checks. If that drop coincides with a threshold event, the note is appended to the threshold message; any `@here` in that combined message comes from the threshold rule, not the drop rule. Slack mentions use the platform token `<!here>` so the notification actually reaches active channel members.
+The cron evaluates the state every ten minutes and sends a routine, untagged PSM balance update every twelve hours. It sends threshold alerts immediately when the observed state changes and repeats an active alert once per hour. It also sends an untagged informational note when the balance decreases by more than 10M USDC between consecutive checks. If that drop coincides with a threshold event, the note is appended to the threshold message; any `@here` in that combined message comes from the threshold rule, not the drop rule. Slack mentions use the platform token `<!here>` so the notification actually reaches active channel members.
 
 ## Verify safely
 
