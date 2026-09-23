@@ -3,6 +3,7 @@ import { readBalance, type makeClient } from "./chain.js";
 import { buildSnapshot } from "./status.js";
 import type { Level, StatusSnapshot } from "./types.js";
 import { safeErrorMessage } from "./errors.js";
+import { SlackAlerter, type SlackAlertStateStore } from "./slack-alerts.js";
 
 type Client = ReturnType<typeof makeClient>;
 
@@ -11,9 +12,16 @@ export class Monitor {
   lastError?: { message: string; at: string };
   private timer?: NodeJS.Timeout;
   private running = false;
+  private readonly slackAlerter: SlackAlerter;
   private lastAlert?: { level: Level; at: number };
 
-  constructor(private readonly client: Client, private readonly config: Config) {}
+  constructor(private readonly client: Client, private readonly config: Config, alertStore?: SlackAlertStateStore) {
+    this.slackAlerter = new SlackAlerter({
+      checkIntervalMs: config.slackCheckIntervalMs,
+      reminderMs: config.slackReminderMs,
+      ...(config.slackWebhookUrl ? { webhookUrl: config.slackWebhookUrl } : {}),
+    }, alertStore);
+  }
 
   async poll(): Promise<void> {
     if (this.running) return;
@@ -29,7 +37,16 @@ export class Monitor {
       this.snapshot = next;
       delete this.lastError;
       console.log(JSON.stringify({ event: "balance_checked", ...next }));
-      await this.maybeAlert(next);
+      try {
+        await this.slackAlerter.check(next);
+      } catch (error) {
+        console.error(JSON.stringify({
+          event: "slack_alert_failed",
+          message: safeErrorMessage(error),
+          at: new Date().toISOString(),
+        }));
+      }
+      await this.maybeGenericAlert(next);
     } catch (error) {
       const message = safeErrorMessage(error);
       this.lastError = { message, at: new Date().toISOString() };
@@ -52,7 +69,8 @@ export class Monitor {
     return Boolean(this.snapshot && now - Date.parse(this.snapshot.checkedAt) <= this.config.staleAfterMs);
   }
 
-  private async maybeAlert(snapshot: StatusSnapshot): Promise<void> {
+  /** Retains the pre-existing generic webhook integration independently of Slack policy alerts. */
+  private async maybeGenericAlert(snapshot: StatusSnapshot): Promise<void> {
     if (!this.config.alertWebhookUrl) return;
     const now = Date.now();
     const isAlert = snapshot.status !== "healthy";

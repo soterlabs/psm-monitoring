@@ -13,7 +13,7 @@ import { SnapshotStore } from "./database.js";
 const config = loadConfig();
 const client = makeClient(config);
 const store = SnapshotStore.fromEnvironment();
-const monitor = new Monitor(client, config);
+const monitor = new Monitor(client, config, store);
 const history = new HistoryMonitor(client, config, store);
 const directExposure = new DirectExposureMonitor(store);
 const psm3 = new Psm3Monitor();

@@ -11,6 +11,7 @@ export default defineRailway(() => {
       ARBITRUM_RPC: preserve(),
       OPTIMISM_RPC: preserve(),
       UNICHAIN_RPC: preserve(),
+      SLACK_WEBHOOK_URL: preserve(),
       DATABASE_URL: snapshots.env.DATABASE_URL,
     },
     healthcheck: "/healthz",

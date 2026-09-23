@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import type { DirectExposurePoint, HistoryPoint } from "./types.js";
+import type { SlackAlertLevel, SlackAlertState, SlackAlertStateStore } from "./slack-alerts.js";
 
 export interface StoredHistory {
   daily: HistoryPoint[];
@@ -14,7 +15,7 @@ export interface StoredExposure {
 
 type HistoryInterval = "daily" | "monthly";
 
-export class SnapshotStore {
+export class SnapshotStore implements SlackAlertStateStore {
   private readonly pool: Pool;
   private initialized?: Promise<void>;
 
@@ -140,6 +141,35 @@ export class SnapshotStore {
     };
   }
 
+  async loadSlackAlertState(): Promise<SlackAlertState | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<{
+      level: SlackAlertLevel;
+      last_checked_at: Date;
+      last_sent_at: Date | null;
+    }>(`SELECT level, last_checked_at, last_sent_at FROM slack_alert_state WHERE singleton = true`);
+    const row = result.rows[0];
+    if (!row) return undefined;
+    return {
+      level: row.level,
+      lastCheckedAt: row.last_checked_at.toISOString(),
+      ...(row.last_sent_at ? { lastSentAt: row.last_sent_at.toISOString() } : {}),
+    };
+  }
+
+  async saveSlackAlertState(state: SlackAlertState): Promise<void> {
+    await this.initialize();
+    await this.pool.query(
+      `INSERT INTO slack_alert_state (singleton, level, last_checked_at, last_sent_at)
+       VALUES (true, $1, $2::timestamptz, $3::timestamptz)
+       ON CONFLICT (singleton) DO UPDATE SET
+         level = EXCLUDED.level,
+         last_checked_at = EXCLUDED.last_checked_at,
+         last_sent_at = EXCLUDED.last_sent_at`,
+      [state.level, state.lastCheckedAt, state.lastSentAt ?? null],
+    );
+  }
+
   async close(): Promise<void> {
     await this.pool.end();
   }
@@ -163,6 +193,12 @@ export class SnapshotStore {
         total_usd double precision NOT NULL,
         venues jsonb NOT NULL,
         updated_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS slack_alert_state (
+        singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+        level text NOT NULL CHECK (level IN ('healthy', 'could_refill', 'refill', 'urgent', 'action_needed')),
+        last_checked_at timestamptz NOT NULL,
+        last_sent_at timestamptz
       );
     `);
   }
