@@ -155,6 +155,12 @@ export class SlackAlerter {
     const dropRaw = previousBalanceRaw !== undefined && previousBalanceRaw > balanceRaw ? previousBalanceRaw - balanceRaw : 0n;
     const largeDrop = dropRaw > LARGE_DROP_RAW;
     let lastInfoSentAt = previous?.lastInfoSentAt;
+    const nextState = (): SlackAlertState => ({
+      level,
+      lastCheckedAt: new Date(now).toISOString(),
+      lastBalanceUsdc: snapshot.totalBalanceUsdc,
+      ...(lastInfoSentAt ? { lastInfoSentAt } : {}),
+    });
 
     if (shouldSendThreshold || largeDrop) {
       const payload = shouldSendThreshold
@@ -170,6 +176,11 @@ export class SlackAlerter {
       console.log(JSON.stringify({ event: "slack_alert_sent", level, crossedDown, recovery, largeDrop, balanceUsdc: snapshot.totalBalanceUsdc }));
     }
 
+    // Checkpoint a successfully delivered threshold/drop (or a quiet check)
+    // before a separate information post can fail and cause it to be replayed.
+    this.state = nextState();
+    await this.persistState();
+
     if (informationDue) {
       const response = await this.post(this.config.webhookUrl, {
         method: "POST",
@@ -180,15 +191,9 @@ export class SlackAlerter {
       if (!response.ok) throw new Error(`Slack webhook returned HTTP ${response.status}`);
       lastInfoSentAt = new Date(now).toISOString();
       console.log(JSON.stringify({ event: "slack_information_sent", balanceUsdc: snapshot.totalBalanceUsdc }));
+      this.state = nextState();
+      await this.persistState();
     }
-
-    this.state = {
-      level,
-      lastCheckedAt: new Date(now).toISOString(),
-      lastBalanceUsdc: snapshot.totalBalanceUsdc,
-      ...(lastInfoSentAt ? { lastInfoSentAt } : {}),
-    };
-    await this.persistState();
   }
 
   private async loadState(): Promise<void> {

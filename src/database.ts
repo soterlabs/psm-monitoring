@@ -222,16 +222,9 @@ export class SnapshotStore implements SlackAlertStateStore {
              AND position('below_4_0' IN pg_get_constraintdef(oid)) = 0
         ) THEN
           ALTER TABLE slack_alert_state DROP CONSTRAINT slack_alert_state_level_check;
-          UPDATE slack_alert_state
-             SET level = CASE
-               WHEN last_balance_usdc < 3500000000 THEN 'below_3_5'
-               WHEN last_balance_usdc < 3600000000 THEN 'below_3_6'
-               WHEN last_balance_usdc < 3700000000 THEN 'below_3_7'
-               WHEN last_balance_usdc < 3800000000 THEN 'below_3_8'
-               WHEN last_balance_usdc < 3900000000 THEN 'below_3_9'
-               WHEN last_balance_usdc < 4000000000 THEN 'below_4_0'
-               ELSE 'healthy'
-             END;
+          -- Start policy v2 from the healthy band so its first check reports any
+          -- already-active threshold instead of silently adopting it.
+          UPDATE slack_alert_state SET level = 'healthy';
           ALTER TABLE slack_alert_state
             ADD CONSTRAINT slack_alert_state_level_check
             CHECK (level IN ('healthy', 'below_4_0', 'below_3_9', 'below_3_8', 'below_3_7', 'below_3_6', 'below_3_5'));

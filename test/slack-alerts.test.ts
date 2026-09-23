@@ -127,6 +127,63 @@ describe("SlackAlerter", () => {
     assert.equal(posts, 0);
   });
 
+  it("reports an active threshold on the first check after the policy migration", async () => {
+    const store = new MemoryStore();
+    store.state = {
+      level: "healthy",
+      lastCheckedAt: "2026-09-23T12:00:00.000Z",
+      lastBalanceUsdc: "3750000000",
+      lastInfoSentAt: "2026-09-23T12:00:00.000Z",
+    };
+    const payloads: Array<{ text: string }> = [];
+    const post = async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      payloads.push(JSON.parse(String(init?.body)) as { text: string });
+      return new Response("ok");
+    };
+    const alerter = new SlackAlerter({ webhookUrl: "https://hooks.slack.com/services/test" }, store, post as typeof fetch);
+
+    await alerter.check(snapshot("3750000000"), Date.parse("2026-09-23T12:10:00.000Z"));
+    assert.equal(payloads.length, 1);
+    assert.match(payloads[0]!.text, /<!here>/);
+    assert.match(payloads[0]!.text, /below 3\.8B/);
+  });
+
+  it("does not replay a tagged crossing when a simultaneous information post fails", async () => {
+    const store = new MemoryStore();
+    store.state = {
+      level: "healthy",
+      lastCheckedAt: "2026-09-23T00:00:00.000Z",
+      lastBalanceUsdc: "4050000000",
+      lastInfoSentAt: "2026-09-23T00:00:00.000Z",
+    };
+    let posts = 0;
+    const failingSecondPost = async (): Promise<Response> => {
+      posts += 1;
+      return posts === 1 ? new Response("ok") : new Response("failed", { status: 500 });
+    };
+    const start = Date.parse("2026-09-23T12:00:00.000Z");
+    const firstRun = new SlackAlerter(
+      { webhookUrl: "https://hooks.slack.com/services/test" },
+      store,
+      failingSecondPost as typeof fetch,
+    );
+
+    await assert.rejects(firstRun.check(snapshot("3750000000"), start), /HTTP 500/);
+    assert.equal(store.state?.level, "below_3_8", "the delivered crossing is checkpointed");
+    assert.equal(store.state?.lastInfoSentAt, "2026-09-23T00:00:00.000Z", "the failed information post remains due");
+
+    const retryPayloads: Array<{ text: string }> = [];
+    const retryPost = async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      retryPayloads.push(JSON.parse(String(init?.body)) as { text: string });
+      return new Response("ok");
+    };
+    const retry = new SlackAlerter({ webhookUrl: "https://hooks.slack.com/services/test" }, store, retryPost as typeof fetch);
+    await retry.check(snapshot("3750000000"), start + 600_000);
+    assert.equal(retryPayloads.length, 1);
+    assert.match(retryPayloads[0]!.text, /PSM balance update/);
+    assert.doesNotMatch(retryPayloads[0]!.text, /<!here>/);
+  });
+
   it("sends an untagged note only when the consecutive-check drop is greater than 10M", async () => {
     const store = new MemoryStore();
     const payloads: Array<{ text: string }> = [];
