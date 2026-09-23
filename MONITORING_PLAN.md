@@ -37,7 +37,7 @@ Threshold percentages and the limit are environment-configurable. Changing them 
 - Railway's `daily-snapshots` cron runs at 02:15 UTC. It rebuilds both the LitePSM and SDE time series, then transactionally upserts date-keyed snapshots into Railway Postgres; reruns are idempotent. The web service reads this durable history every 15 minutes.
 - An empty database is seeded automatically by the web service. If Postgres is unavailable, the dashboard falls back to live reconstruction instead of losing history availability. Ethereum reconstruction requires an archive-capable RPC.
 - `/metrics` provides balance, limit, utilization, freshness, last-success time, and RPC-error metrics for external alerting.
-- An optional webhook sends state-change, recovery, and hourly reminder notifications.
+- A dedicated Railway cron uses an optional Slack Incoming Webhook to apply the documented 3.95B/3.90B/3.85B/3.80B escalation policy every ten minutes, send state-change and recovery messages, repeat active alerts hourly, and report an untagged greater-than-10M balance drop between consecutive checks. See [SLACK_SETUP.md](SLACK_SETUP.md).
 - A failed RPC poll preserves the last good value, records the error, and retries on the next interval.
 - `/readyz` fails when there is no successful reading or it is older than 180 seconds. `/healthz` only confirms the process is alive.
 - All contract and token reads in a poll are pinned to one block to prevent internally inconsistent balances.

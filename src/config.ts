@@ -11,6 +11,8 @@ export interface Config {
   orangePercent: number;
   pollIntervalMs: number;
   staleAfterMs: number;
+  slackReminderMs: number;
+  slackWebhookUrl?: string;
   alertReminderMs: number;
   alertWebhookUrl?: string;
 }
@@ -54,6 +56,16 @@ export function loadConfig(): Config {
   }
   if (limitRaw <= 0n) throw new Error("LIMIT_USDC must be positive");
 
+  const slackWebhookUrl = process.env.SLACK_WEBHOOK_URL || undefined;
+  if (slackWebhookUrl) {
+    try {
+      const url = new URL(slackWebhookUrl);
+      if (url.protocol !== "https:") throw new Error("not HTTPS");
+    } catch {
+      throw new Error("SLACK_WEBHOOK_URL must be a valid HTTPS URL");
+    }
+  }
+
   const alertWebhookUrl = process.env.ALERT_WEBHOOK_URL || undefined;
   if (alertWebhookUrl) {
     try {
@@ -62,6 +74,8 @@ export function loadConfig(): Config {
       throw new Error("ALERT_WEBHOOK_URL must be a valid URL");
     }
   }
+
+  const pollIntervalMs = numberFromEnv("POLL_INTERVAL_SECONDS", 60, 10) * 1_000;
 
   return {
     rpcUrl,
@@ -72,8 +86,10 @@ export function loadConfig(): Config {
     limitUsdc,
     yellowPercent,
     orangePercent,
-    pollIntervalMs: numberFromEnv("POLL_INTERVAL_SECONDS", 60, 10) * 1_000,
+    pollIntervalMs,
     staleAfterMs: numberFromEnv("STALE_AFTER_SECONDS", 180, 30) * 1_000,
+    slackReminderMs: numberFromEnv("SLACK_REMINDER_SECONDS", 3_600, 60) * 1_000,
+    ...(slackWebhookUrl ? { slackWebhookUrl } : {}),
     alertReminderMs: numberFromEnv("ALERT_REMINDER_SECONDS", 3_600, 60) * 1_000,
     ...(alertWebhookUrl ? { alertWebhookUrl } : {}),
   };

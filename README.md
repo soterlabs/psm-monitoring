@@ -60,13 +60,13 @@ npm run build
 
 The repository includes a production `Dockerfile` and Railway infrastructure-as-code in `.railway/railway.ts`. It declares the web service, a persistent Postgres database, and the `daily-snapshots` cron worker. Set `ETH_RPC` on the web service and run `railway config apply`; the worker references the same secret and runs `npm run cron` at 02:15 UTC. Railway supplies `PORT` automatically.
 
-Optional alerting works with generic JSON, Slack, or Discord webhooks:
+Optional Slack alerting uses an Incoming Webhook:
 
 ```text
-ALERT_WEBHOOK_URL=https://...
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 
-The webhook receives an alert on entry into a warning state, on severity changes, after recovery, and hourly while an alert persists. Change `ALERT_REMINDER_SECONDS` to adjust reminders.
+The dedicated `slack-psm-alerts` Railway cron evaluates the PSM balance every ten minutes, applies the 3.95B/3.90B/3.85B/3.80B escalation policy, alerts immediately on state changes, repeats an active alert hourly, and sends an untagged note for a greater-than-10M drop between consecutive checks. See [SLACK_SETUP.md](SLACK_SETUP.md) for the Slack and Railway setup procedure.
 
 ## Configuration
 
@@ -80,8 +80,10 @@ The webhook receives an alert on entry into a warning state, on severity changes
 | `ORANGE_PERCENT` | no | `90` | Orange threshold; lower values are red |
 | `POLL_INTERVAL_SECONDS` | no | `60` | On-chain polling cadence; minimum 10 |
 | `STALE_AFTER_SECONDS` | no | `180` | Reading age that fails readiness |
-| `ALERT_WEBHOOK_URL` | no | — | Alert destination |
-| `ALERT_REMINDER_SECONDS` | no | `3600` | Re-alert interval; minimum 60 |
+| `SLACK_WEBHOOK_URL` | no | — | Secret Slack Incoming Webhook URL |
+| `SLACK_REMINDER_SECONDS` | no | `3600` | Active-alert reminder interval; minimum 60 |
+| `ALERT_WEBHOOK_URL` | no | — | Legacy generic webhook; do not point it at the same Slack channel |
+| `ALERT_REMINDER_SECONDS` | no | `3600` | Legacy generic-webhook reminder interval |
 | `SETTLEMENT_API_URL` | no | public settle API | Override the SDE daily-data service |
 | `SKY_DATA_API_URL` | no | BA Labs public Sky Data API | Override the Basin JTRSY history service |
 | `BASE_RPC` | yes for PSM3 verification | — | Base JSON-RPC URL |

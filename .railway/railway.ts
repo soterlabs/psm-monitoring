@@ -11,6 +11,7 @@ export default defineRailway(() => {
       ARBITRUM_RPC: preserve(),
       OPTIMISM_RPC: preserve(),
       UNICHAIN_RPC: preserve(),
+      SLACK_WEBHOOK_URL: preserve(),
       DATABASE_URL: snapshots.env.DATABASE_URL,
     },
     healthcheck: "/healthz",
@@ -30,7 +31,21 @@ export default defineRailway(() => {
     },
   });
 
+  const slackAlerts = fn("slack-psm-alerts", {
+    source: github("soterlabs/psm-monitoring"),
+    env: {
+      ETH_RPC: psmMonitoring.env.ETH_RPC,
+      SLACK_WEBHOOK_URL: psmMonitoring.env.SLACK_WEBHOOK_URL,
+      DATABASE_URL: snapshots.env.DATABASE_URL,
+    },
+    start: "npm run slack-alert",
+    deploy: {
+      cronSchedule: "*/10 * * * *",
+      restartPolicyType: "NEVER",
+    },
+  });
+
   return project("psm-monitoring", {
-    resources: [snapshots, psmMonitoring, dailySnapshots],
+    resources: [snapshots, psmMonitoring, dailySnapshots, slackAlerts],
   });
 });

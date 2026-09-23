@@ -29,7 +29,7 @@ export class Monitor {
       this.snapshot = next;
       delete this.lastError;
       console.log(JSON.stringify({ event: "balance_checked", ...next }));
-      await this.maybeAlert(next);
+      await this.maybeGenericAlert(next);
     } catch (error) {
       const message = safeErrorMessage(error);
       this.lastError = { message, at: new Date().toISOString() };
@@ -52,7 +52,8 @@ export class Monitor {
     return Boolean(this.snapshot && now - Date.parse(this.snapshot.checkedAt) <= this.config.staleAfterMs);
   }
 
-  private async maybeAlert(snapshot: StatusSnapshot): Promise<void> {
+  /** Retains the pre-existing generic webhook integration independently of Slack policy alerts. */
+  private async maybeGenericAlert(snapshot: StatusSnapshot): Promise<void> {
     if (!this.config.alertWebhookUrl) return;
     const now = Date.now();
     const isAlert = snapshot.status !== "healthy";
