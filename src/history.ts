@@ -66,7 +66,7 @@ export class HistoryMonitor {
     if (this.retryTimer) clearTimeout(this.retryTimer);
   }
 
-  async load(pocket: Address): Promise<void> {
+  async load(pocket: Address, retry = true): Promise<void> {
     if (this.loading) return;
     this.loading = true;
     try {
@@ -124,8 +124,10 @@ export class HistoryMonitor {
       const message = safeErrorMessage(error);
       this.lastError = { message, at: new Date().toISOString() };
       console.error(JSON.stringify({ event: "history_failed", message, at: this.lastError.at }));
-      this.retryTimer = setTimeout(() => void this.load(pocket), 30_000);
-      this.retryTimer.unref();
+      if (retry) {
+        this.retryTimer = setTimeout(() => void this.load(pocket), 30_000);
+        this.retryTimer.unref();
+      }
     } finally {
       this.loading = false;
     }

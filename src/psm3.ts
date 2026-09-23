@@ -95,7 +95,7 @@ export class Psm3Monitor {
     if (this.retryTimer) clearTimeout(this.retryTimer);
   }
 
-  async poll(): Promise<void> {
+  async poll(retry = true): Promise<void> {
     if (this.loading) return;
     this.loading = true;
     try {
@@ -107,8 +107,10 @@ export class Psm3Monitor {
       const message = safeErrorMessage(error);
       this.lastError = { message, at: new Date().toISOString() };
       console.error(JSON.stringify({ event: "psm3_failed", message, at: this.lastError.at }));
-      this.retryTimer = setTimeout(() => void this.poll(), 30_000);
-      this.retryTimer.unref();
+      if (retry) {
+        this.retryTimer = setTimeout(() => void this.poll(), 30_000);
+        this.retryTimer.unref();
+      }
     } finally {
       this.loading = false;
     }

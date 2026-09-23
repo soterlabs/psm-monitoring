@@ -233,7 +233,7 @@ export class DirectExposureMonitor {
     if (this.retryTimer) clearTimeout(this.retryTimer);
   }
 
-  async load(now = new Date()): Promise<void> {
+  async load(now = new Date(), retry = true): Promise<void> {
     if (this.loading) return;
     this.loading = true;
     try {
@@ -264,8 +264,10 @@ export class DirectExposureMonitor {
       const message = safeErrorMessage(error);
       this.lastError = { message, at: new Date().toISOString() };
       console.error(JSON.stringify({ event: "direct_exposure_failed", message, at: this.lastError.at }));
-      this.retryTimer = setTimeout(() => void this.load(), 30_000);
-      this.retryTimer.unref();
+      if (retry) {
+        this.retryTimer = setTimeout(() => void this.load(), 30_000);
+        this.retryTimer.unref();
+      }
     } finally {
       this.loading = false;
     }
