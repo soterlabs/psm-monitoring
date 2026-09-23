@@ -20,7 +20,12 @@ export class SnapshotStore implements SlackAlertStateStore {
   private initialized?: Promise<void>;
 
   constructor(databaseUrl: string) {
-    this.pool = new Pool({ connectionString: databaseUrl, max: 3 });
+    this.pool = new Pool({
+      connectionString: databaseUrl,
+      max: 3,
+      idleTimeoutMillis: 10_000,
+      allowExitOnIdle: true,
+    });
   }
 
   static fromEnvironment(): SnapshotStore | undefined {

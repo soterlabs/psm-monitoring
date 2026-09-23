@@ -17,7 +17,7 @@ It compares that balance with a 4 billion USDC minimum target. Defaults are:
 - `critical` (orange): 90% to below 95%
 - `low` (red): below 90%
 
-The dashboard charts daily on-chain snapshots for the last 7, 30, 90, or 180 days and monthly snapshots from January 2025 onward. A Railway cron service refreshes both chart datasets every day at 02:15 UTC and upserts them into Railway Postgres. On an empty database, the web service reconstructs and seeds the history automatically; archive RPC reads remain the fallback if storage is unavailable.
+The dashboard charts daily on-chain snapshots for the last 7, 30, 90, or 180 days and monthly snapshots from January 2025 onward. A Railway cron service refreshes both chart datasets every day at 02:15 UTC and upserts them into Railway Postgres. The web process loads history from Postgres on request; on an empty database it reconstructs and seeds the history automatically, with archive RPC reads as the storage fallback.
 
 The same dashboard also shows USDC-equivalent capacity across Grove and Spark SDE venues, both per venue and in aggregate. Its reviewed daily history begins in January 2025, is zero before the first SDE designation on 23 October 2025, and applies each later Atlas scope transition on its effective date. The immutable data is kept in [`src/data/sde-history.json`](src/data/sde-history.json); the live service extends it after the reviewed cutoff. The dashboard also provides month-end history and live chain-by-chain verification of USDC held by the Base, Arbitrum, Optimism, and Unichain PSM3 contracts. See [DIRECT_EXPOSURE.md](DIRECT_EXPOSURE.md) for its scope, calculation, and liquidity caveats.
 
@@ -58,7 +58,7 @@ npm run build
 
 ## Deploy to Railway
 
-The repository includes a production `Dockerfile` and Railway infrastructure-as-code in `.railway/railway.ts`. It declares the web service, a persistent Postgres database, and the `daily-snapshots` cron worker. Set `ETH_RPC` on the web service and run `railway config apply`; the worker references the same secret and runs `npm run cron` at 02:15 UTC. Railway supplies `PORT` automatically.
+The repository includes a production `Dockerfile` and Railway infrastructure-as-code in `.railway/railway.ts`. It declares a serverless web service, persistent Postgres, the `daily-snapshots` cron, and the ten-minute Slack alert cron. The web service performs no background polling: dashboard and API requests refresh live readings on demand, allowing Railway to sleep it while unused. The first request after sleep may require a retry during Railway's cold start. Set `ETH_RPC` on the web service and run `railway config apply`; the workers reference the required secrets. Railway supplies `PORT` automatically.
 
 Optional Slack alerting uses an Incoming Webhook:
 

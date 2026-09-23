@@ -16,6 +16,9 @@ export default defineRailway(() => {
     },
     healthcheck: "/healthz",
     healthcheckTimeout: 30,
+    deploy: {
+      sleepApplication: true,
+    },
   });
 
   const dailySnapshots = fn("daily-snapshots", {

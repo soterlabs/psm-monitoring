@@ -17,7 +17,6 @@ const monitor = new Monitor(client, config);
 const history = new HistoryMonitor(client, config, store);
 const directExposure = new DirectExposureMonitor(store);
 const psm3 = new Psm3Monitor();
-let historyWaitTimer: NodeJS.Timeout | undefined;
 const soterLogo = readFileSync(new URL("../public/soter-labs.png", import.meta.url));
 const brandFont = readFileSync(new URL("../public/deltha.otf", import.meta.url));
 const favicon = readFileSync(new URL("../public/favicon.svg", import.meta.url));
@@ -90,7 +89,24 @@ function metrics(): string {
   return `${lines.join("\n")}\n`;
 }
 
-const server = createServer((request, response) => {
+function olderThan(timestamp: string | undefined, maxAgeMs: number): boolean {
+  return !timestamp || Date.now() - Date.parse(timestamp) >= maxAgeMs;
+}
+
+async function refreshReserve(): Promise<void> {
+  if (olderThan(monitor.snapshot?.checkedAt, 45_000)) await monitor.poll();
+}
+
+async function refreshPsm3(): Promise<void> {
+  if (olderThan(psm3.snapshot?.checkedAt, 4.5 * 60_000)) await psm3.poll(false);
+}
+
+async function refreshHistory(): Promise<void> {
+  await refreshReserve();
+  if (monitor.snapshot) await history.load(getAddress(monitor.snapshot.pocketAddress), false);
+}
+
+const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://localhost");
   const path = url.pathname;
   if (request.method !== "GET") return send(response, 405, "text/plain; charset=utf-8", "Method not allowed\n");
@@ -105,10 +121,12 @@ const server = createServer((request, response) => {
     return send(response, fresh ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({ status: fresh ? "ready" : "not_ready" })}\n`);
   }
   if (path === "/api/status") {
+    await refreshReserve();
     const fresh = monitor.isFresh();
     return send(response, monitor.snapshot ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({ fresh, snapshot: monitor.snapshot ?? null, error: monitor.lastError ?? null })}\n`);
   }
   if (path === "/api/history") {
+    await refreshHistory();
     const requested = url.searchParams.get("range");
     const range = requested === "7d" || requested === "30d" || requested === "180d" || requested === "monthly" ? requested : "90d";
     return send(response, 200, "application/json; charset=utf-8", `${JSON.stringify({
@@ -118,6 +136,7 @@ const server = createServer((request, response) => {
     })}\n`);
   }
   if (path === "/api/direct-exposure") {
+    await directExposure.load(new Date(), false);
     const requested = url.searchParams.get("range");
     const range = requested === "7d" || requested === "30d" || requested === "ytd" || requested === "all" || requested === "monthly" ? requested : "90d";
     return send(response, directExposure.series.has(range) ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({
@@ -127,33 +146,22 @@ const server = createServer((request, response) => {
     })}\n`);
   }
   if (path === "/api/psm3") {
+    await refreshPsm3();
     return send(response, psm3.snapshot ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({
       loading: psm3.loading,
       snapshot: psm3.snapshot ?? null,
       error: psm3.lastError ?? null,
     })}\n`);
   }
-  if (path === "/metrics") return send(response, 200, "text/plain; version=0.0.4; charset=utf-8", metrics());
+  if (path === "/metrics") {
+    await Promise.all([refreshReserve(), refreshPsm3(), directExposure.load(new Date(), false)]);
+    return send(response, 200, "text/plain; version=0.0.4; charset=utf-8", metrics());
+  }
   return send(response, 404, "text/plain; charset=utf-8", "Not found\n");
 });
 
-await monitor.poll();
-monitor.start();
-directExposure.start();
-psm3.start();
 server.listen(config.port, "0.0.0.0", () => {
-  console.log(JSON.stringify({ event: "server_started", port: config.port }));
-  const startHistory = (): void => {
-    if (monitor.snapshot) {
-      history.start(getAddress(monitor.snapshot.pocketAddress));
-      if (historyWaitTimer) clearInterval(historyWaitTimer);
-    }
-  };
-  startHistory();
-  if (!monitor.snapshot) {
-    historyWaitTimer = setInterval(startHistory, 10_000);
-    historyWaitTimer.unref();
-  }
+  console.log(JSON.stringify({ event: "server_started", port: config.port, mode: "request_driven" }));
 });
 
 function shutdown(signal: string): void {
@@ -162,7 +170,6 @@ function shutdown(signal: string): void {
   history.stop();
   directExposure.stop();
   psm3.stop();
-  if (historyWaitTimer) clearInterval(historyWaitTimer);
   server.close(() => {
     if (store) void store.close().finally(() => process.exit(0));
     else process.exit(0);

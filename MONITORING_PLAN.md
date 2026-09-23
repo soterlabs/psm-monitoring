@@ -6,7 +6,7 @@ Detect when USDC controlled by Ethereum Sky LitePSM USDC-A falls below the confi
 
 ## Signal and scope
 
-Every 60 seconds the service reads one Ethereum block and:
+The ten-minute Slack cron and on-demand dashboard refreshes each read one Ethereum block and:
 
 1. Reads `pocket()` and `gem()` from LitePSM `0xf6e72Db5454dd049d0788e411b06CfAF16853042`.
 2. Confirms the chain ID is Ethereum mainnet (`1`) and `gem()` is canonical USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`.
@@ -34,11 +34,12 @@ Threshold percentages and the limit are environment-configurable. Changing them 
 
 - Dashboard and `/api/status` expose the latest result.
 - `/api/history` and the dashboard chart expose 7-, 30-, 90-, and 180-day daily snapshots plus monthly snapshots from January 2025 onward. The same page shows equivalent short ranges, reviewed Atlas-effective SDE daily history from January 2025 (zero before the first designation on 23 October 2025), and month-end points.
-- Railway's `daily-snapshots` cron runs at 02:15 UTC. It rebuilds both the LitePSM and SDE time series, then transactionally upserts date-keyed snapshots into Railway Postgres; reruns are idempotent. The web service reads this durable history every 15 minutes.
+- Railway's `daily-snapshots` cron runs at 02:15 UTC. It rebuilds both the LitePSM and SDE time series, then transactionally upserts date-keyed snapshots into Railway Postgres; reruns are idempotent. The serverless web service reads this durable history when requested.
 - An empty database is seeded automatically by the web service. If Postgres is unavailable, the dashboard falls back to live reconstruction instead of losing history availability. Ethereum reconstruction requires an archive-capable RPC.
 - `/metrics` provides balance, limit, utilization, freshness, last-success time, and RPC-error metrics for external alerting.
 - A dedicated Railway cron uses an optional Slack Incoming Webhook to post an untagged balance update every twelve hours, apply the documented 3.95B/3.90B/3.85B/3.80B escalation policy every ten minutes, send state-change and recovery messages, repeat active alerts hourly, and report an untagged greater-than-10M balance drop between consecutive checks. See [SLACK_SETUP.md](SLACK_SETUP.md).
-- A failed RPC poll preserves the last good value, records the error, and retries on the next interval.
+- The web service has no background polling and can sleep while the dashboard is unused. Dashboard/API traffic refreshes live readings on demand; a cold first request may need a retry while Railway wakes the container.
+- A failed RPC read preserves the last good value and records the error; the next dashboard/API request retries it.
 - `/readyz` fails when there is no successful reading or it is older than 180 seconds. `/healthz` only confirms the process is alive.
 - All contract and token reads in a poll are pinned to one block to prevent internally inconsistent balances.
 
