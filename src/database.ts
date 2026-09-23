@@ -148,7 +148,8 @@ export class SnapshotStore implements SlackAlertStateStore {
       last_checked_at: Date;
       last_balance_usdc: string;
       last_threshold_sent_at: Date | null;
-    }>(`SELECT level, last_checked_at, last_balance_usdc::text, last_threshold_sent_at FROM slack_alert_state WHERE singleton = true`);
+      last_info_sent_at: Date;
+    }>(`SELECT level, last_checked_at, last_balance_usdc::text, last_threshold_sent_at, last_info_sent_at FROM slack_alert_state WHERE singleton = true`);
     const row = result.rows[0];
     if (!row) return undefined;
     return {
@@ -156,20 +157,22 @@ export class SnapshotStore implements SlackAlertStateStore {
       lastCheckedAt: row.last_checked_at.toISOString(),
       lastBalanceUsdc: row.last_balance_usdc,
       ...(row.last_threshold_sent_at ? { lastThresholdSentAt: row.last_threshold_sent_at.toISOString() } : {}),
+      lastInfoSentAt: row.last_info_sent_at.toISOString(),
     };
   }
 
   async saveSlackAlertState(state: SlackAlertState): Promise<void> {
     await this.initialize();
     await this.pool.query(
-      `INSERT INTO slack_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_threshold_sent_at)
-       VALUES (true, $1, $2::timestamptz, $3::numeric, $4::timestamptz)
+      `INSERT INTO slack_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_threshold_sent_at, last_info_sent_at)
+       VALUES (true, $1, $2::timestamptz, $3::numeric, $4::timestamptz, $5::timestamptz)
        ON CONFLICT (singleton) DO UPDATE SET
          level = EXCLUDED.level,
          last_checked_at = EXCLUDED.last_checked_at,
          last_balance_usdc = EXCLUDED.last_balance_usdc,
-         last_threshold_sent_at = EXCLUDED.last_threshold_sent_at`,
-      [state.level, state.lastCheckedAt, state.lastBalanceUsdc, state.lastThresholdSentAt ?? null],
+         last_threshold_sent_at = EXCLUDED.last_threshold_sent_at,
+         last_info_sent_at = EXCLUDED.last_info_sent_at`,
+      [state.level, state.lastCheckedAt, state.lastBalanceUsdc, state.lastThresholdSentAt ?? null, state.lastInfoSentAt ?? null],
     );
   }
 
@@ -202,8 +205,11 @@ export class SnapshotStore implements SlackAlertStateStore {
         level text NOT NULL CHECK (level IN ('healthy', 'could_refill', 'refill', 'urgent', 'action_needed')),
         last_checked_at timestamptz NOT NULL,
         last_balance_usdc numeric(30, 6) NOT NULL,
-        last_threshold_sent_at timestamptz
+        last_threshold_sent_at timestamptz,
+        last_info_sent_at timestamptz NOT NULL DEFAULT now()
       );
+      ALTER TABLE slack_alert_state
+        ADD COLUMN IF NOT EXISTS last_info_sent_at timestamptz NOT NULL DEFAULT now();
     `);
   }
 }

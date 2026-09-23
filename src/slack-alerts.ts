@@ -9,6 +9,7 @@ export interface SlackAlertState {
   lastCheckedAt: string;
   lastBalanceUsdc: string;
   lastThresholdSentAt?: string;
+  lastInfoSentAt?: string;
 }
 
 export interface SlackAlertStateStore {
@@ -29,6 +30,7 @@ const THRESHOLDS = {
 };
 const LARGE_DROP_RAW = parseUnits("10000000", 6);
 const CRON_START_TOLERANCE_MS = 120_000;
+const INFORMATION_INTERVAL_MS = 12 * 60 * 60 * 1_000;
 
 export function slackAlertLevel(balanceUsdc: string): SlackAlertLevel {
   const balance = parseUnits(balanceUsdc, 6);
@@ -103,6 +105,19 @@ export function slackDropMessage(snapshot: StatusSnapshot, previousBalanceUsdc: 
   };
 }
 
+export function slackInformationMessage(snapshot: StatusSnapshot): { text: string; blocks: unknown[] } {
+  const title = "ℹ️ PSM balance update";
+  const message = `Current PSM USDC balance: *${displayBalance(snapshot.totalBalanceUsdc)}*.`;
+  return {
+    text: `${title}\n${message.replace(/\*/g, "")}\nEthereum block: ${snapshot.blockNumber} · Checked ${snapshot.checkedAt}`,
+    blocks: [
+      { type: "header", text: { type: "plain_text", text: title, emoji: true } },
+      { type: "section", text: { type: "mrkdwn", text: message } },
+      { type: "context", elements: [{ type: "mrkdwn", text: `Checked ${snapshot.checkedAt} · Ethereum block \`${snapshot.blockNumber}\` · <https://psm-monitoring-production.up.railway.app|Open PSM monitor>` }] },
+    ],
+  };
+}
+
 export class SlackAlerter {
   private state: SlackAlertState | undefined;
   private loaded = false;
@@ -126,11 +141,14 @@ export class SlackAlerter {
     );
     const recovery = level === "healthy" && previous !== undefined && previous.level !== "healthy";
     const shouldSendThreshold = level !== "healthy" ? changed || reminderDue : recovery;
+    const informationDue = !previous?.lastInfoSentAt
+      || now - Date.parse(previous.lastInfoSentAt) >= INFORMATION_INTERVAL_MS - CRON_START_TOLERANCE_MS;
     const previousBalanceRaw = previous ? parseUnits(previous.lastBalanceUsdc, 6) : undefined;
     const balanceRaw = parseUnits(snapshot.totalBalanceUsdc, 6);
     const dropRaw = previousBalanceRaw !== undefined && previousBalanceRaw > balanceRaw ? previousBalanceRaw - balanceRaw : 0n;
     const largeDrop = dropRaw > LARGE_DROP_RAW;
     let lastThresholdSentAt = previous?.lastThresholdSentAt;
+    let lastInfoSentAt = previous?.lastInfoSentAt;
 
     if (shouldSendThreshold || largeDrop) {
       const payload = shouldSendThreshold
@@ -147,11 +165,24 @@ export class SlackAlerter {
       console.log(JSON.stringify({ event: "slack_alert_sent", level, recovery, largeDrop, balanceUsdc: snapshot.totalBalanceUsdc }));
     }
 
+    if (informationDue) {
+      const response = await this.post(this.config.webhookUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(slackInformationMessage(snapshot)),
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!response.ok) throw new Error(`Slack webhook returned HTTP ${response.status}`);
+      lastInfoSentAt = new Date(now).toISOString();
+      console.log(JSON.stringify({ event: "slack_information_sent", balanceUsdc: snapshot.totalBalanceUsdc }));
+    }
+
     this.state = {
       level,
       lastCheckedAt: new Date(now).toISOString(),
       lastBalanceUsdc: snapshot.totalBalanceUsdc,
       ...(lastThresholdSentAt ? { lastThresholdSentAt } : {}),
+      ...(lastInfoSentAt ? { lastInfoSentAt } : {}),
     };
     await this.persistState();
   }

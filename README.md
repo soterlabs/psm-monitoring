@@ -66,7 +66,7 @@ Optional Slack alerting uses an Incoming Webhook:
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 
-The dedicated `slack-psm-alerts` Railway cron evaluates the PSM balance every ten minutes, applies the 3.95B/3.90B/3.85B/3.80B escalation policy, alerts immediately on state changes, repeats an active alert hourly, and sends an untagged note for a greater-than-10M drop between consecutive checks. See [SLACK_SETUP.md](SLACK_SETUP.md) for the Slack and Railway setup procedure.
+The dedicated `slack-psm-alerts` Railway cron evaluates the PSM balance every ten minutes, posts an untagged informational balance update every twelve hours, applies the 3.95B/3.90B/3.85B/3.80B escalation policy, alerts immediately on state changes, repeats an active alert hourly, and sends an untagged note for a greater-than-10M drop between consecutive checks. See [SLACK_SETUP.md](SLACK_SETUP.md) for the Slack and Railway setup procedure.
 
 ## Configuration
 
