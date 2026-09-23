@@ -16,7 +16,6 @@ async function main(): Promise<void> {
     const snapshot = buildSnapshot(reading, config.limitRaw, config.yellowPercent, config.orangePercent);
     const alerter = new SlackAlerter({
       webhookUrl: config.slackWebhookUrl,
-      reminderMs: config.slackReminderMs,
     }, store);
     await alerter.check(snapshot);
     console.log(JSON.stringify({ event: "slack_cron_complete", balanceUsdc: snapshot.totalBalanceUsdc, blockNumber: snapshot.blockNumber }));

@@ -66,7 +66,7 @@ Optional Slack alerting uses an Incoming Webhook:
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 
-The dedicated `slack-psm-alerts` Railway cron evaluates the PSM balance every ten minutes, posts an untagged informational balance update every twelve hours, applies the 3.95B/3.90B/3.85B/3.80B escalation policy, alerts immediately on state changes, repeats an active alert hourly, and sends an untagged note for a greater-than-10M drop between consecutive checks. See [SLACK_SETUP.md](SLACK_SETUP.md) for the Slack and Railway setup procedure.
+The dedicated `slack-psm-alerts` Railway cron evaluates the PSM balance every ten minutes, posts an untagged informational balance update every twelve hours, and alerts on downward crossings at 4.0B, 3.9B, 3.8B, 3.7B, 3.6B, and 3.5B USDC. The 3.8B through 3.6B alerts mention `@here` and request an internal SFF reaction; the 3.5B alert is a critical `🚨 ACTION NEEDED` notification. A greater-than-10M drop between consecutive checks produces a separate untagged note. See [SLACK_SETUP.md](SLACK_SETUP.md) for the Slack and Railway setup procedure.
 
 ## Configuration
 
@@ -81,7 +81,6 @@ The dedicated `slack-psm-alerts` Railway cron evaluates the PSM balance every te
 | `POLL_INTERVAL_SECONDS` | no | `60` | On-chain polling cadence; minimum 10 |
 | `STALE_AFTER_SECONDS` | no | `180` | Reading age that fails readiness |
 | `SLACK_WEBHOOK_URL` | no | — | Secret Slack Incoming Webhook URL |
-| `SLACK_REMINDER_SECONDS` | no | `3600` | Active-alert reminder interval; minimum 60 |
 | `ALERT_WEBHOOK_URL` | no | — | Legacy generic webhook; do not point it at the same Slack channel |
 | `ALERT_REMINDER_SECONDS` | no | `3600` | Legacy generic-webhook reminder interval |
 | `SETTLEMENT_API_URL` | no | public settle API | Override the SDE daily-data service |

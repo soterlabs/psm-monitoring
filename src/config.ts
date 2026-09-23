@@ -11,7 +11,6 @@ export interface Config {
   orangePercent: number;
   pollIntervalMs: number;
   staleAfterMs: number;
-  slackReminderMs: number;
   slackWebhookUrl?: string;
   alertReminderMs: number;
   alertWebhookUrl?: string;
@@ -88,7 +87,6 @@ export function loadConfig(): Config {
     orangePercent,
     pollIntervalMs,
     staleAfterMs: numberFromEnv("STALE_AFTER_SECONDS", 180, 30) * 1_000,
-    slackReminderMs: numberFromEnv("SLACK_REMINDER_SECONDS", 3_600, 60) * 1_000,
     ...(slackWebhookUrl ? { slackWebhookUrl } : {}),
     alertReminderMs: numberFromEnv("ALERT_REMINDER_SECONDS", 3_600, 60) * 1_000,
     ...(alertWebhookUrl ? { alertWebhookUrl } : {}),

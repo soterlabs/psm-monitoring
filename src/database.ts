@@ -152,16 +152,14 @@ export class SnapshotStore implements SlackAlertStateStore {
       level: SlackAlertLevel;
       last_checked_at: Date;
       last_balance_usdc: string;
-      last_threshold_sent_at: Date | null;
       last_info_sent_at: Date;
-    }>(`SELECT level, last_checked_at, last_balance_usdc::text, last_threshold_sent_at, last_info_sent_at FROM slack_alert_state WHERE singleton = true`);
+    }>(`SELECT level, last_checked_at, last_balance_usdc::text, last_info_sent_at FROM slack_alert_state WHERE singleton = true`);
     const row = result.rows[0];
     if (!row) return undefined;
     return {
       level: row.level,
       lastCheckedAt: row.last_checked_at.toISOString(),
       lastBalanceUsdc: row.last_balance_usdc,
-      ...(row.last_threshold_sent_at ? { lastThresholdSentAt: row.last_threshold_sent_at.toISOString() } : {}),
       lastInfoSentAt: row.last_info_sent_at.toISOString(),
     };
   }
@@ -169,15 +167,14 @@ export class SnapshotStore implements SlackAlertStateStore {
   async saveSlackAlertState(state: SlackAlertState): Promise<void> {
     await this.initialize();
     await this.pool.query(
-      `INSERT INTO slack_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_threshold_sent_at, last_info_sent_at)
-       VALUES (true, $1, $2::timestamptz, $3::numeric, $4::timestamptz, $5::timestamptz)
+      `INSERT INTO slack_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_info_sent_at)
+       VALUES (true, $1, $2::timestamptz, $3::numeric, $4::timestamptz)
        ON CONFLICT (singleton) DO UPDATE SET
          level = EXCLUDED.level,
          last_checked_at = EXCLUDED.last_checked_at,
          last_balance_usdc = EXCLUDED.last_balance_usdc,
-         last_threshold_sent_at = EXCLUDED.last_threshold_sent_at,
          last_info_sent_at = EXCLUDED.last_info_sent_at`,
-      [state.level, state.lastCheckedAt, state.lastBalanceUsdc, state.lastThresholdSentAt ?? null, state.lastInfoSentAt ?? null],
+      [state.level, state.lastCheckedAt, state.lastBalanceUsdc, state.lastInfoSentAt ?? null],
     );
   }
 
@@ -207,14 +204,40 @@ export class SnapshotStore implements SlackAlertStateStore {
       );
       CREATE TABLE IF NOT EXISTS slack_alert_state (
         singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
-        level text NOT NULL CHECK (level IN ('healthy', 'could_refill', 'refill', 'urgent', 'action_needed')),
+        level text NOT NULL CONSTRAINT slack_alert_state_level_check
+          CHECK (level IN ('healthy', 'below_4_0', 'below_3_9', 'below_3_8', 'below_3_7', 'below_3_6', 'below_3_5')),
         last_checked_at timestamptz NOT NULL,
         last_balance_usdc numeric(30, 6) NOT NULL,
-        last_threshold_sent_at timestamptz,
         last_info_sent_at timestamptz NOT NULL DEFAULT now()
       );
       ALTER TABLE slack_alert_state
         ADD COLUMN IF NOT EXISTS last_info_sent_at timestamptz NOT NULL DEFAULT now();
+      DO $migration$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+            FROM pg_constraint
+           WHERE conrelid = 'slack_alert_state'::regclass
+             AND conname = 'slack_alert_state_level_check'
+             AND position('below_4_0' IN pg_get_constraintdef(oid)) = 0
+        ) THEN
+          ALTER TABLE slack_alert_state DROP CONSTRAINT slack_alert_state_level_check;
+          UPDATE slack_alert_state
+             SET level = CASE
+               WHEN last_balance_usdc < 3500000000 THEN 'below_3_5'
+               WHEN last_balance_usdc < 3600000000 THEN 'below_3_6'
+               WHEN last_balance_usdc < 3700000000 THEN 'below_3_7'
+               WHEN last_balance_usdc < 3800000000 THEN 'below_3_8'
+               WHEN last_balance_usdc < 3900000000 THEN 'below_3_9'
+               WHEN last_balance_usdc < 4000000000 THEN 'below_4_0'
+               ELSE 'healthy'
+             END;
+          ALTER TABLE slack_alert_state
+            ADD CONSTRAINT slack_alert_state_level_check
+            CHECK (level IN ('healthy', 'below_4_0', 'below_3_9', 'below_3_8', 'below_3_7', 'below_3_6', 'below_3_5'));
+        END IF;
+      END;
+      $migration$;
     `);
   }
 }
