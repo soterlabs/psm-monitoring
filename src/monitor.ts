@@ -3,7 +3,6 @@ import { readBalance, type makeClient } from "./chain.js";
 import { buildSnapshot } from "./status.js";
 import type { Level, StatusSnapshot } from "./types.js";
 import { safeErrorMessage } from "./errors.js";
-import { SlackAlerter, type SlackAlertStateStore } from "./slack-alerts.js";
 
 type Client = ReturnType<typeof makeClient>;
 
@@ -12,16 +11,9 @@ export class Monitor {
   lastError?: { message: string; at: string };
   private timer?: NodeJS.Timeout;
   private running = false;
-  private readonly slackAlerter: SlackAlerter;
   private lastAlert?: { level: Level; at: number };
 
-  constructor(private readonly client: Client, private readonly config: Config, alertStore?: SlackAlertStateStore) {
-    this.slackAlerter = new SlackAlerter({
-      checkIntervalMs: config.slackCheckIntervalMs,
-      reminderMs: config.slackReminderMs,
-      ...(config.slackWebhookUrl ? { webhookUrl: config.slackWebhookUrl } : {}),
-    }, alertStore);
-  }
+  constructor(private readonly client: Client, private readonly config: Config) {}
 
   async poll(): Promise<void> {
     if (this.running) return;
@@ -37,15 +29,6 @@ export class Monitor {
       this.snapshot = next;
       delete this.lastError;
       console.log(JSON.stringify({ event: "balance_checked", ...next }));
-      try {
-        await this.slackAlerter.check(next);
-      } catch (error) {
-        console.error(JSON.stringify({
-          event: "slack_alert_failed",
-          message: safeErrorMessage(error),
-          at: new Date().toISOString(),
-        }));
-      }
       await this.maybeGenericAlert(next);
     } catch (error) {
       const message = safeErrorMessage(error);

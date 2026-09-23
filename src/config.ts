@@ -11,7 +11,6 @@ export interface Config {
   orangePercent: number;
   pollIntervalMs: number;
   staleAfterMs: number;
-  slackCheckIntervalMs: number;
   slackReminderMs: number;
   slackWebhookUrl?: string;
   alertReminderMs: number;
@@ -77,10 +76,6 @@ export function loadConfig(): Config {
   }
 
   const pollIntervalMs = numberFromEnv("POLL_INTERVAL_SECONDS", 60, 10) * 1_000;
-  const slackCheckIntervalMs = numberFromEnv("SLACK_CHECK_INTERVAL_SECONDS", 600, 60) * 1_000;
-  if (slackWebhookUrl && pollIntervalMs > slackCheckIntervalMs) {
-    throw new Error("POLL_INTERVAL_SECONDS must not exceed SLACK_CHECK_INTERVAL_SECONDS when Slack alerting is enabled");
-  }
 
   return {
     rpcUrl,
@@ -93,7 +88,6 @@ export function loadConfig(): Config {
     orangePercent,
     pollIntervalMs,
     staleAfterMs: numberFromEnv("STALE_AFTER_SECONDS", 180, 30) * 1_000,
-    slackCheckIntervalMs,
     slackReminderMs: numberFromEnv("SLACK_REMINDER_SECONDS", 3_600, 60) * 1_000,
     ...(slackWebhookUrl ? { slackWebhookUrl } : {}),
     alertReminderMs: numberFromEnv("ALERT_REMINDER_SECONDS", 3_600, 60) * 1_000,

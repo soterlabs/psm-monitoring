@@ -66,7 +66,7 @@ Optional Slack alerting uses an Incoming Webhook:
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 
-The Slack bot evaluates the PSM balance every ten minutes, applies the 3.95B/3.90B/3.85B/3.80B escalation policy, alerts immediately on state changes, and repeats an active alert hourly. See [SLACK_SETUP.md](SLACK_SETUP.md) for the Slack and Railway setup procedure.
+The dedicated `slack-psm-alerts` Railway cron evaluates the PSM balance every ten minutes, applies the 3.95B/3.90B/3.85B/3.80B escalation policy, alerts immediately on state changes, repeats an active alert hourly, and sends an untagged note for a greater-than-10M drop between consecutive checks. See [SLACK_SETUP.md](SLACK_SETUP.md) for the Slack and Railway setup procedure.
 
 ## Configuration
 
@@ -81,7 +81,6 @@ The Slack bot evaluates the PSM balance every ten minutes, applies the 3.95B/3.9
 | `POLL_INTERVAL_SECONDS` | no | `60` | On-chain polling cadence; minimum 10 |
 | `STALE_AFTER_SECONDS` | no | `180` | Reading age that fails readiness |
 | `SLACK_WEBHOOK_URL` | no | — | Secret Slack Incoming Webhook URL |
-| `SLACK_CHECK_INTERVAL_SECONDS` | no | `600` | Slack policy evaluation cadence; minimum 60 |
 | `SLACK_REMINDER_SECONDS` | no | `3600` | Active-alert reminder interval; minimum 60 |
 | `ALERT_WEBHOOK_URL` | no | — | Legacy generic webhook; do not point it at the same Slack channel |
 | `ALERT_REMINDER_SECONDS` | no | `3600` | Legacy generic-webhook reminder interval |

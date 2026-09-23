@@ -21,14 +21,13 @@ Add the webhook URL to the `psm-monitoring` web service as a secret variable:
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 
-The defaults implement the requested timing:
+The hourly reminder interval defaults to:
 
 ```text
-SLACK_CHECK_INTERVAL_SECONDS=600
 SLACK_REMINDER_SECONDS=3600
 ```
 
-Deploy or restart the web service after adding the secret. Do not add the webhook to the `daily-snapshots` cron service. Alert state is stored in the existing Railway Postgres database, so deployments do not reset the hourly reminder timer.
+Apply the Railway configuration after merging the PR. It creates a dedicated `slack-psm-alerts` cron service scheduled with `*/10 * * * *`; the cron references the web service's sealed webhook variable and the existing Postgres database. Do not add the webhook to the `daily-snapshots` cron service. Alert state and the previous checked balance are stored in Postgres, so deployments do not reset the hourly reminder timer or the consecutive-check comparison.
 
 ## Alert policy
 
@@ -42,8 +41,8 @@ The rules use the same Ethereum reading as the dashboard: canonical USDC held by
 | `< 3.85B` and `≥ 3.80B` | “Should be refilled urgently”; `@here` |
 | `< 3.80B` | 🚨 **ACTION NEEDED**; urgent refill; `@here` |
 
-The app evaluates the state every ten minutes, sends immediately when the observed state changes, and repeats the active alert once per hour. Slack mentions use the platform token `<!here>` so the notification actually reaches active channel members.
+The cron evaluates the state every ten minutes, sends immediately when the observed state changes, and repeats the active alert once per hour. It also sends an untagged informational note when the balance decreases by more than 10M USDC between consecutive checks. If that drop coincides with a threshold event, the note is appended to the threshold message; any `@here` in that combined message comes from the threshold rule, not the drop rule. Slack mentions use the platform token `<!here>` so the notification actually reaches active channel members.
 
 ## Verify safely
 
-After deployment, confirm the service logs contain normal `balance_checked` events and no `slack_alert_failed` event. Because a healthy balance intentionally produces no initial message, temporarily lowering production thresholds is not supported. To test the Slack webhook itself without generating a protocol alert, use Slack's webhook setup page or send a clearly labelled test message from a secure terminal, then delete the shell history entry if the URL was entered directly.
+After deployment, confirm the `slack-psm-alerts` cron completes successfully every ten minutes and its logs contain `slack_cron_complete`, with no `slack_cron_failed` event. Because a healthy balance intentionally produces no initial message, temporarily lowering production thresholds is not supported. To test the Slack webhook itself without generating a protocol alert, use Slack's webhook setup page or send a clearly labelled test message from a secure terminal, then delete the shell history entry if the URL was entered directly.

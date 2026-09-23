@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   SlackAlerter,
   slackAlertLevel,
+  slackDropMessage,
   slackMessage,
   type SlackAlertState,
   type SlackAlertStateStore,
@@ -54,11 +55,12 @@ describe("slackAlertLevel", () => {
     assert.match(slackMessage(snapshot("3840000000"), "urgent").text, /<!here>/);
     assert.match(slackMessage(snapshot("3790000000"), "action_needed").text, /<!here>/);
     assert.match(slackMessage(snapshot("3790000000"), "action_needed").text, /🚨 ACTION NEEDED/);
+    assert.doesNotMatch(slackDropMessage(snapshot("3980000000"), "4000000000", 20_000_000_000_000n).text, /<!here>/);
   });
 });
 
 describe("SlackAlerter", () => {
-  it("checks every ten minutes, alerts on transitions, and reminds hourly", async () => {
+  it("alerts on cron-observed transitions and reminds hourly", async () => {
     const store = new MemoryStore();
     const payloads: Array<{ text: string }> = [];
     const post = async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -67,18 +69,15 @@ describe("SlackAlerter", () => {
     };
     const alerter = new SlackAlerter({
       webhookUrl: "https://hooks.slack.com/services/test",
-      checkIntervalMs: 600_000,
       reminderMs: 3_600_000,
     }, store, post as typeof fetch);
     const start = Date.parse("2026-09-23T12:00:00.000Z");
 
     await alerter.check(snapshot("3940000000"), start);
-    await alerter.check(snapshot("3890000000"), start + 60_000);
-    assert.equal(payloads.length, 1, "does not re-evaluate before ten minutes");
-
     await alerter.check(snapshot("3890000000"), start + 600_000);
     assert.equal(payloads.length, 2, "alerts when the next check sees a severity transition");
     assert.match(payloads[1]!.text, /<!here>/);
+    assert.match(payloads[1]!.text, /decreased by 50.000M USDC/);
 
     await alerter.check(snapshot("3890000000"), start + 1_200_000);
     assert.equal(payloads.length, 2, "does not remind before one hour");
@@ -96,17 +95,62 @@ describe("SlackAlerter", () => {
     store.state = {
       level: "could_refill",
       lastCheckedAt: "2026-09-23T12:00:00.000Z",
-      lastSentAt: "2026-09-23T12:00:00.000Z",
+      lastBalanceUsdc: "3940000000",
+      lastThresholdSentAt: "2026-09-23T12:00:00.000Z",
     };
     let posts = 0;
     const post = async (): Promise<Response> => { posts += 1; return new Response("ok"); };
     const alerter = new SlackAlerter({
       webhookUrl: "https://hooks.slack.com/services/test",
-      checkIntervalMs: 600_000,
       reminderMs: 3_600_000,
     }, store, post as typeof fetch);
 
     await alerter.check(snapshot("3940000000"), Date.parse("2026-09-23T12:10:00.000Z"));
     assert.equal(posts, 0);
+  });
+
+  it("sends an untagged note only when the consecutive-check drop is greater than 10M", async () => {
+    const store = new MemoryStore();
+    const payloads: Array<{ text: string }> = [];
+    const post = async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      payloads.push(JSON.parse(String(init?.body)) as { text: string });
+      return new Response("ok");
+    };
+    const alerter = new SlackAlerter({
+      webhookUrl: "https://hooks.slack.com/services/test",
+      reminderMs: 3_600_000,
+    }, store, post as typeof fetch);
+    const start = Date.parse("2026-09-23T12:00:00.000Z");
+
+    await alerter.check(snapshot("4000000000"), start);
+    await alerter.check(snapshot("3990000000"), start + 600_000);
+    assert.equal(payloads.length, 0, "exactly 10M is not greater than 10M");
+
+    await alerter.check(snapshot("3979999999"), start + 1_200_000);
+    assert.equal(payloads.length, 1);
+    assert.match(payloads[0]!.text, /balance movement/i);
+    assert.match(payloads[0]!.text, /10.000M USDC/);
+    assert.doesNotMatch(payloads[0]!.text, /<!here>/);
+  });
+
+  it("does not turn a drop-only note into another tagged threshold alert", async () => {
+    const store = new MemoryStore();
+    const payloads: Array<{ text: string }> = [];
+    const post = async (_url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      payloads.push(JSON.parse(String(init?.body)) as { text: string });
+      return new Response("ok");
+    };
+    const alerter = new SlackAlerter({
+      webhookUrl: "https://hooks.slack.com/services/test",
+      reminderMs: 3_600_000,
+    }, store, post as typeof fetch);
+    const start = Date.parse("2026-09-23T12:00:00.000Z");
+
+    await alerter.check(snapshot("3890000000"), start);
+    assert.match(payloads[0]!.text, /<!here>/);
+    await alerter.check(snapshot("3879000000"), start + 600_000);
+    assert.equal(payloads.length, 2);
+    assert.match(payloads[1]!.text, /balance movement/i);
+    assert.doesNotMatch(payloads[1]!.text, /<!here>/);
   });
 });
