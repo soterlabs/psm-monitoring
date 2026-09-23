@@ -1,14 +1,13 @@
 import { parseUnits } from "viem";
 import type { StatusSnapshot } from "./types.js";
 
-export const slackAlertLevels = ["healthy", "could_refill", "refill", "urgent", "action_needed"] as const;
+export const slackAlertLevels = ["healthy", "below_4_0", "below_3_9", "below_3_8", "below_3_7", "below_3_6", "below_3_5"] as const;
 export type SlackAlertLevel = (typeof slackAlertLevels)[number];
 
 export interface SlackAlertState {
   level: SlackAlertLevel;
   lastCheckedAt: string;
   lastBalanceUsdc: string;
-  lastThresholdSentAt?: string;
   lastInfoSentAt?: string;
 }
 
@@ -19,25 +18,31 @@ export interface SlackAlertStateStore {
 
 export interface SlackAlertConfig {
   webhookUrl?: string;
-  reminderMs: number;
 }
 
 const THRESHOLDS = {
-  couldRefill: parseUnits("3950000000", 6),
-  refill: parseUnits("3900000000", 6),
-  urgent: parseUnits("3850000000", 6),
-  actionNeeded: parseUnits("3800000000", 6),
+  four: parseUnits("4000000000", 6),
+  threeNine: parseUnits("3900000000", 6),
+  threeEight: parseUnits("3800000000", 6),
+  threeSeven: parseUnits("3700000000", 6),
+  threeSix: parseUnits("3600000000", 6),
+  threeFive: parseUnits("3500000000", 6),
 };
 const LARGE_DROP_RAW = parseUnits("10000000", 6);
 const CRON_START_TOLERANCE_MS = 120_000;
 const INFORMATION_INTERVAL_MS = 12 * 60 * 60 * 1_000;
+const SEVERITY: Record<SlackAlertLevel, number> = Object.fromEntries(
+  slackAlertLevels.map((level, index) => [level, index]),
+) as Record<SlackAlertLevel, number>;
 
 export function slackAlertLevel(balanceUsdc: string): SlackAlertLevel {
   const balance = parseUnits(balanceUsdc, 6);
-  if (balance < THRESHOLDS.actionNeeded) return "action_needed";
-  if (balance < THRESHOLDS.urgent) return "urgent";
-  if (balance < THRESHOLDS.refill) return "refill";
-  if (balance < THRESHOLDS.couldRefill) return "could_refill";
+  if (balance < THRESHOLDS.threeFive) return "below_3_5";
+  if (balance < THRESHOLDS.threeSix) return "below_3_6";
+  if (balance < THRESHOLDS.threeSeven) return "below_3_7";
+  if (balance < THRESHOLDS.threeEight) return "below_3_8";
+  if (balance < THRESHOLDS.threeNine) return "below_3_9";
+  if (balance < THRESHOLDS.four) return "below_4_0";
   return "healthy";
 }
 
@@ -62,19 +67,23 @@ export function slackMessage(
 
   if (recovery) {
     title = "✅ PSM balance recovered";
-    message = `The PSM balance is back at or above 3.95B USDC.\n${details}`;
-  } else if (level === "action_needed") {
+    message = `The PSM balance is back at or above 4.0B USDC.\n${details}`;
+  } else if (level === "below_3_5") {
     title = "🚨 ACTION NEEDED";
-    message = `<!here> The PSM balance is below 3.80B USDC and should be refilled urgently.\n${details}`;
-  } else if (level === "urgent") {
-    title = "PSM urgent refill alert";
-    message = `<!here> The PSM balance is below 3.85B USDC and should be refilled urgently.\n${details}`;
-  } else if (level === "refill") {
-    title = "PSM refill alert";
-    message = `<!here> The PSM balance is below 3.90B USDC and should be refilled.\n${details}`;
+    message = `<!here> The PSM balance crossed below 3.5B USDC. SFF should be notified urgently that the PSM should be refilled.\n${details}`;
+  } else if (level === "below_3_8") {
+    title = "⚠️ Important PSM balance threshold";
+    message = `<!here> The PSM balance crossed below 3.8B USDC. SFF should be notified for internal reaction.\n${details}`;
+  } else if (level === "below_3_7" || level === "below_3_6") {
+    const threshold = level === "below_3_7" ? "3.7B" : "3.6B";
+    title = "⚠️ Important PSM balance threshold";
+    message = `<!here> The PSM balance crossed below ${threshold} USDC. Restating the 3.8B alert: SFF should be notified for internal reaction.\n${details}`;
+  } else if (level === "below_3_9") {
+    title = "PSM balance below 3.9B";
+    message = `The PSM balance crossed below 3.9B USDC.\n${details}`;
   } else {
-    title = "PSM refill capacity notice";
-    message = `The PSM balance is below 3.95B USDC and could be refilled.\n${details}`;
+    title = "PSM balance below 4.0B";
+    message = `The PSM balance crossed below 4.0B USDC.\n${details}`;
   }
 
   if (dropRaw > LARGE_DROP_RAW) {
@@ -134,21 +143,24 @@ export class SlackAlerter {
     const previous = this.state;
 
     const level = slackAlertLevel(snapshot.totalBalanceUsdc);
-    const changed = previous?.level !== level;
-    const reminderDue = level !== "healthy" && (
-      !previous?.lastThresholdSentAt
-      || now - Date.parse(previous.lastThresholdSentAt) >= Math.max(0, this.config.reminderMs - CRON_START_TOLERANCE_MS)
-    );
     const recovery = level === "healthy" && previous !== undefined && previous.level !== "healthy";
-    const shouldSendThreshold = level !== "healthy" ? changed || reminderDue : recovery;
+    const crossedDown = level !== "healthy" && (
+      previous === undefined || SEVERITY[level] > SEVERITY[previous.level]
+    );
+    const shouldSendThreshold = crossedDown || recovery;
     const informationDue = !previous?.lastInfoSentAt
       || now - Date.parse(previous.lastInfoSentAt) >= INFORMATION_INTERVAL_MS - CRON_START_TOLERANCE_MS;
     const previousBalanceRaw = previous ? parseUnits(previous.lastBalanceUsdc, 6) : undefined;
     const balanceRaw = parseUnits(snapshot.totalBalanceUsdc, 6);
     const dropRaw = previousBalanceRaw !== undefined && previousBalanceRaw > balanceRaw ? previousBalanceRaw - balanceRaw : 0n;
     const largeDrop = dropRaw > LARGE_DROP_RAW;
-    let lastThresholdSentAt = previous?.lastThresholdSentAt;
     let lastInfoSentAt = previous?.lastInfoSentAt;
+    const nextState = (): SlackAlertState => ({
+      level,
+      lastCheckedAt: new Date(now).toISOString(),
+      lastBalanceUsdc: snapshot.totalBalanceUsdc,
+      ...(lastInfoSentAt ? { lastInfoSentAt } : {}),
+    });
 
     if (shouldSendThreshold || largeDrop) {
       const payload = shouldSendThreshold
@@ -161,9 +173,13 @@ export class SlackAlerter {
         signal: AbortSignal.timeout(10_000),
       });
       if (!response.ok) throw new Error(`Slack webhook returned HTTP ${response.status}`);
-      if (shouldSendThreshold) lastThresholdSentAt = new Date(now).toISOString();
-      console.log(JSON.stringify({ event: "slack_alert_sent", level, recovery, largeDrop, balanceUsdc: snapshot.totalBalanceUsdc }));
+      console.log(JSON.stringify({ event: "slack_alert_sent", level, crossedDown, recovery, largeDrop, balanceUsdc: snapshot.totalBalanceUsdc }));
     }
+
+    // Checkpoint a successfully delivered threshold/drop (or a quiet check)
+    // before a separate information post can fail and cause it to be replayed.
+    this.state = nextState();
+    await this.persistState();
 
     if (informationDue) {
       const response = await this.post(this.config.webhookUrl, {
@@ -175,16 +191,9 @@ export class SlackAlerter {
       if (!response.ok) throw new Error(`Slack webhook returned HTTP ${response.status}`);
       lastInfoSentAt = new Date(now).toISOString();
       console.log(JSON.stringify({ event: "slack_information_sent", balanceUsdc: snapshot.totalBalanceUsdc }));
+      this.state = nextState();
+      await this.persistState();
     }
-
-    this.state = {
-      level,
-      lastCheckedAt: new Date(now).toISOString(),
-      lastBalanceUsdc: snapshot.totalBalanceUsdc,
-      ...(lastThresholdSentAt ? { lastThresholdSentAt } : {}),
-      ...(lastInfoSentAt ? { lastInfoSentAt } : {}),
-    };
-    await this.persistState();
   }
 
   private async loadState(): Promise<void> {

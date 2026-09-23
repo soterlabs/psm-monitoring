@@ -21,13 +21,7 @@ Add the webhook URL to the `psm-monitoring` web service as a secret variable:
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 ```
 
-The hourly reminder interval defaults to:
-
-```text
-SLACK_REMINDER_SECONDS=3600
-```
-
-Apply the Railway configuration after merging the PR. It creates a dedicated `slack-psm-alerts` cron service scheduled with `*/10 * * * *`; the cron references the web service's sealed webhook variable and the existing Postgres database. Do not add the webhook to the `daily-snapshots` cron service. Alert state and the previous checked balance are stored in Postgres, so deployments do not reset the hourly reminder timer or the consecutive-check comparison.
+Apply the Railway configuration after merging the PR. It creates a dedicated `slack-psm-alerts` cron service scheduled with `*/10 * * * *`; the cron references the web service's sealed webhook variable and the existing Postgres database. Do not add the webhook to the `daily-snapshots` cron service. The last observed threshold band, informational-message time, and previous checked balance are stored in Postgres, so deployments do not reset the crossing, twelve-hour, or consecutive-check state.
 
 ## Alert policy
 
@@ -35,13 +29,15 @@ The rules use the same Ethereum reading as the dashboard: canonical USDC held by
 
 | Balance | Slack message |
 | --- | --- |
-| `≥ 3.95B` | No alert; one untagged recovery message after an alert clears |
-| `< 3.95B` and `≥ 3.90B` | “Could be refilled”; no mention |
-| `< 3.90B` and `≥ 3.85B` | “Should be refilled”; `@here` |
-| `< 3.85B` and `≥ 3.80B` | “Should be refilled urgently”; `@here` |
-| `< 3.80B` | 🚨 **ACTION NEEDED**; urgent refill; `@here` |
+| `≥ 4.0B` | No threshold alert; one untagged recovery message after the balance fully recovers |
+| `< 4.0B` and `≥ 3.9B` | Downward-crossing message; no mention |
+| `< 3.9B` and `≥ 3.8B` | Downward-crossing message; no mention |
+| `< 3.8B` and `≥ 3.7B` | Important threshold; `@here`; SFF should be notified for internal reaction |
+| `< 3.7B` and `≥ 3.6B` | Restates the 3.8B important message; `@here` again |
+| `< 3.6B` and `≥ 3.5B` | Restates the 3.8B important message; `@here` again |
+| `< 3.5B` | 🚨 **ACTION NEEDED**; `@here`; SFF should be notified urgently that the PSM should be refilled |
 
-The cron evaluates the state every ten minutes and sends a routine, untagged PSM balance update every twelve hours. It sends threshold alerts immediately when the observed state changes and repeats an active alert once per hour. It also sends an untagged informational note when the balance decreases by more than 10M USDC between consecutive checks. If that drop coincides with a threshold event, the note is appended to the threshold message; any `@here` in that combined message comes from the threshold rule, not the drop rule. Slack mentions use the platform token `<!here>` so the notification actually reaches active channel members.
+The cron evaluates the state every ten minutes and sends a routine, untagged PSM balance update every twelve hours. A threshold message is sent only when the observed balance crosses into a lower band; it is not repeated merely because time elapsed. If the balance moves up without reaching 4.0B, no threshold message is sent, but a later downward crossing alerts again. A full recovery to at least 4.0B sends one untagged recovery message. The cron also sends an untagged informational note when the balance decreases by more than 10M USDC between consecutive checks. If that drop coincides with a threshold crossing, the note is appended to the threshold message; any `@here` in that combined message comes from the threshold rule, not the drop rule. Slack mentions use the platform token `<!here>` so the notification actually reaches active channel members.
 
 ## Verify safely
 
