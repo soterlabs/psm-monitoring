@@ -93,17 +93,35 @@ function olderThan(timestamp: string | undefined, maxAgeMs: number): boolean {
   return !timestamp || Date.now() - Date.parse(timestamp) >= maxAgeMs;
 }
 
+let reserveRefresh: Promise<void> | undefined;
+let psm3Refresh: Promise<void> | undefined;
+let historyRefresh: Promise<void> | undefined;
+let directExposureRefresh: Promise<void> | undefined;
+
 async function refreshReserve(): Promise<void> {
-  if (olderThan(monitor.snapshot?.checkedAt, 45_000)) await monitor.poll();
+  if (!olderThan(monitor.snapshot?.checkedAt, 45_000)) return;
+  reserveRefresh ??= monitor.poll().finally(() => { reserveRefresh = undefined; });
+  await reserveRefresh;
 }
 
 async function refreshPsm3(): Promise<void> {
-  if (olderThan(psm3.snapshot?.checkedAt, 4.5 * 60_000)) await psm3.poll(false);
+  if (!olderThan(psm3.snapshot?.checkedAt, 4.5 * 60_000)) return;
+  psm3Refresh ??= psm3.poll(false).finally(() => { psm3Refresh = undefined; });
+  await psm3Refresh;
 }
 
 async function refreshHistory(): Promise<void> {
-  await refreshReserve();
-  if (monitor.snapshot) await history.load(getAddress(monitor.snapshot.pocketAddress), false);
+  historyRefresh ??= (async () => {
+    await refreshReserve();
+    if (monitor.snapshot) await history.load(getAddress(monitor.snapshot.pocketAddress), false);
+  })().finally(() => { historyRefresh = undefined; });
+  await historyRefresh;
+}
+
+async function refreshDirectExposure(): Promise<void> {
+  directExposureRefresh ??= directExposure.load(new Date(), false)
+    .finally(() => { directExposureRefresh = undefined; });
+  await directExposureRefresh;
 }
 
 const server = createServer(async (request, response) => {
@@ -136,7 +154,7 @@ const server = createServer(async (request, response) => {
     })}\n`);
   }
   if (path === "/api/direct-exposure") {
-    await directExposure.load(new Date(), false);
+    await refreshDirectExposure();
     const requested = url.searchParams.get("range");
     const range = requested === "7d" || requested === "30d" || requested === "ytd" || requested === "all" || requested === "monthly" ? requested : "90d";
     return send(response, directExposure.series.has(range) ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({
@@ -154,7 +172,7 @@ const server = createServer(async (request, response) => {
     })}\n`);
   }
   if (path === "/metrics") {
-    await Promise.all([refreshReserve(), refreshPsm3(), directExposure.load(new Date(), false)]);
+    await Promise.all([refreshReserve(), refreshPsm3(), refreshDirectExposure()]);
     return send(response, 200, "text/plain; version=0.0.4; charset=utf-8", metrics());
   }
   return send(response, 404, "text/plain; charset=utf-8", "Not found\n");
