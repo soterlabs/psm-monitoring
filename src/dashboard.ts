@@ -67,8 +67,9 @@ async function loadWithdrawals(range){
   const response=await fetch('/api/withdrawals?range='+encodeURIComponent(range),{cache:'no-store'}),data=await response.json();
   if(request!==withdrawalRequest)return;
   if(!data.snapshot)throw new Error(data.error?.message||'Withdrawal data is unavailable');
-  const snapshot=data.snapshot;
+  const snapshot=data.snapshot,retryDelay=data.retryAt?Math.min(300000,Math.max(30000,Date.parse(data.retryAt)-Date.now())):30000;
   if(!snapshot.complete){
+   if(data.error?.code==='rate_limited'){message('Withdrawal indexing is temporarily paused.');note.textContent='The data provider is rate limiting requests. Retrying after '+new Date(data.retryAt).toLocaleString()+'.';withdrawalTimer=setTimeout(()=>loadWithdrawals(range),retryDelay);return;}
    if(data.error)throw new Error(data.error.message);
    message('Loading withdrawal history… '+snapshot.indexedPercent.toFixed(0)+'%');
    note.textContent='Preparing complete history for the selected period.';
@@ -85,8 +86,8 @@ async function loadWithdrawals(range){
   });
   if(!snapshot.rows.length)message('No net USDC withdrawers in this period.');
   note.textContent='Rolling '+range.slice(0,-1)+'-day period · '+new Date(snapshot.from).toLocaleString()+' – '+new Date(snapshot.asOf).toLocaleString()+' · finalized Ethereum blocks';
-  if(data.error){error.style.display='block';error.textContent='Latest refresh issue: '+data.error.message}
-  withdrawalTimer=setTimeout(()=>loadWithdrawals(range),data.labelsLoading?5000:300000);
+  if(data.error){error.style.display='block';error.textContent=data.error.code==='rate_limited'?'Provider rate limit: showing saved rankings. Next update attempt after '+new Date(data.retryAt).toLocaleString()+'.':'Latest refresh issue: '+data.error.message}
+  withdrawalTimer=setTimeout(()=>loadWithdrawals(range),data.labelsLoading?5000:data.retryAt?retryDelay:300000);
  }catch(e){
   if(request!==withdrawalRequest)return;
   message('Withdrawal data is unavailable.');note.textContent='Retrying shortly…';error.style.display='block';error.textContent=e.message;

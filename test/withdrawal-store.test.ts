@@ -44,3 +44,31 @@ it("Postgres commits events and cursors atomically and rejects competing stale w
     await Promise.all([store.close(), other.close(), cleanup.end()]);
   }
 });
+
+it("Postgres prevents simultaneous web/cron refreshes and shares cooldown across processes", { skip: !url }, async () => {
+  const store = new WithdrawalStore(url!), other = new WithdrawalStore(url!);
+  const cleanup = new Pool({ connectionString: url! });
+  const psm = `0x${randomBytes(20).toString("hex")}`;
+  let release!: () => void, entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  try {
+    const first = store.withRefreshLock(psm, async () => { entered(); await pending; });
+    await started;
+    let competingCalls = 0;
+    await other.withRefreshLock(psm, async () => { competingCalls++; });
+    assert.equal(competingCalls, 0);
+    release(); await first;
+    const cooldown = { retryAt: "2026-11-06T13:00:00.000Z", failures: 2,
+      error: { message: "rate limited", at: "2026-11-06T12:00:00.000Z", code: "rate_limited" as const } };
+    await store.withRefreshLock(psm, () => store.saveRefreshState(psm, cooldown));
+    assert.deepEqual(await other.loadRefreshState(psm), cooldown);
+    await assert.rejects(store.withRefreshLock(psm, async () => { throw new Error("provider failed"); }), /provider failed/);
+    await other.withRefreshLock(psm, async () => { competingCalls++; });
+    assert.equal(competingCalls, 1, "a failed refresh releases its session lock");
+  } finally {
+    release?.();
+    await cleanup.query("DELETE FROM psm_usdc_flow_refresh WHERE psm_address = $1", [psm]);
+    await Promise.all([store.close(), other.close(), cleanup.end()]);
+  }
+});

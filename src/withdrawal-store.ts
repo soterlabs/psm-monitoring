@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import type { WithdrawalRefreshState } from "./withdrawal-rate-limit.js";
 import type { WithdrawalEvent, WithdrawalIndexState, WithdrawalStorage, WithdrawalTotal } from "./withdrawals.js";
 
 export class WithdrawalStore implements WithdrawalStorage {
@@ -31,6 +32,9 @@ export class WithdrawalStore implements WithdrawalStorage {
       CREATE TABLE IF NOT EXISTS psm_usdc_flow_index (
         psm_address text PRIMARY KEY, state jsonb NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS psm_usdc_flow_refresh (
+        psm_address text PRIMARY KEY, state jsonb NOT NULL
+      );
     `);
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK"); throw error; }
@@ -40,6 +44,30 @@ export class WithdrawalStore implements WithdrawalStorage {
     await this.initialize();
     const result = await this.pool.query<{ state: WithdrawalIndexState }>("SELECT state FROM psm_usdc_flow_index WHERE psm_address = $1", [psm]);
     return result.rows[0]?.state;
+  }
+  async loadRefreshState(psm: string): Promise<WithdrawalRefreshState | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<{ state: WithdrawalRefreshState }>("SELECT state FROM psm_usdc_flow_refresh WHERE psm_address = $1", [psm]);
+    return result.rows[0]?.state;
+  }
+  async saveRefreshState(psm: string, state: WithdrawalRefreshState): Promise<void> {
+    await this.initialize();
+    await this.pool.query(`INSERT INTO psm_usdc_flow_refresh (psm_address, state) VALUES ($1, $2::jsonb)
+      ON CONFLICT (psm_address) DO UPDATE SET state = EXCLUDED.state`, [psm, JSON.stringify(state)]);
+  }
+  async withRefreshLock(psm: string, operation: () => Promise<void>): Promise<void> {
+    await this.initialize();
+    const client = await this.pool.connect();
+    let locked = false, destroy = false;
+    try {
+      const result = await client.query<{ locked: boolean }>("SELECT pg_try_advisory_lock(hashtext($1)) AS locked", [`psm-withdrawals-refresh:${psm}`]);
+      locked = result.rows[0]!.locked;
+      if (locked) await operation();
+    } finally {
+      try { if (locked) await client.query("SELECT pg_advisory_unlock(hashtext($1))", [`psm-withdrawals-refresh:${psm}`]); }
+      catch { destroy = true; }
+      client.release(destroy);
+    }
   }
   async savePage(psm: string, expected: number | undefined, events: WithdrawalEvent[], state: WithdrawalIndexState): Promise<void> {
     await this.initialize();
