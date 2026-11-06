@@ -294,13 +294,24 @@ export class WithdrawalMonitor {
   }
 
   async result(range: WithdrawalRange) {
-    const state = await this.storage.load(this.config.psmAddress.toLowerCase());
+    const wasRefreshing = Boolean(this.refreshing);
+    const psm = this.config.psmAddress.toLowerCase();
+    const [state, sharedRefresh] = await Promise.all([
+      this.storage.load(psm), this.storage.loadRefreshState?.(psm),
+    ]);
+    // Read shared recovery before serving cached rankings, without waiting for a
+    // provider request or overwriting an in-flight refresh's local error state.
+    if (!wasRefreshing && !this.refreshing && sharedRefresh) {
+      if (sharedRefresh.error || this.lastError?.code === "rate_limited") this.lastError = sharedRefresh.error ?? undefined;
+      this.retryAt = sharedRefresh.retryAt ?? undefined;
+    }
     const asOf = state?.throughTimestamp;
     const from = asOf ? new Date(Date.parse(asOf) - Number(range.slice(0, -1)) * 86400_000).toISOString() : undefined;
     const covered = from && state && state.startTimestamp <= from;
     const rows = covered ? await this.storage.totals(this.config.psmAddress.toLowerCase(), from, asOf!) : [];
     return {
       range, complete: Boolean(covered), asOf: asOf ?? null, from: from ?? null,
+      syncPending: Boolean(state && state.nextBlock <= state.targetBlock),
       indexedPercent: state ? Math.min(100, Math.max(0, (Date.parse(state.throughTimestamp) - Date.parse(state.startTimestamp)) / (Number(range.slice(0, -1)) * 86400_000) * 100)) : 0,
       attribution: "Net USDC withdrawn minus replenished per reserve counterparty. Canonical USDS wrapper deposits credited to their funding caller; other routers can represent multiple users.",
       rows: rows.map((row, index) => ({ rank: index + 1, address: getAddress(row.address), label: withdrawalLabels[row.address.toLowerCase()] ?? null,

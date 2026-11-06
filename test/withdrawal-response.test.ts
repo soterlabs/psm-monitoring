@@ -26,7 +26,9 @@ it("serves a covered range while an older-history request is still pending", { t
   const monitor = new WithdrawalMonitor(client, cfg, store, async () => pending);
   const response = await withdrawalResponse(monitor, "7d");
   assert.equal(response.status, 200); assert.equal(response.body.snapshot.complete, true);
+  assert.equal(response.body.snapshot.syncPending, true);
   resolve({ next_block: 101, data: [] }); await monitor.refresh();
+  assert.equal((await monitor.result("7d")).syncPending, false);
 });
 
 it("returns loading within its wait budget and retains an initial in-flight page", { timeout: 1000 }, async () => {
@@ -74,6 +76,25 @@ it("shares rate-limit cooldown across monitor restarts and preserves the cursor 
   const recovered = new WithdrawalMonitor(client, cfg, store, async () => ({ next_block: 101, data: [] }));
   await recovered.refresh();
   assert.equal((await store.loadRefreshState(psm))?.error, null);
+  const recoveredResponse = await withdrawalResponse(monitor, "7d");
+  assert.equal(recoveredResponse.body.error, null, "a cached response immediately observes another worker's recovery");
+  assert.equal(recoveredResponse.body.retryAt, null);
   await monitor.refresh(); // Already indexed and fresh: no provider call.
   assert.equal(monitor.lastError, undefined);
+});
+
+it("finishes a paginated head refresh even when 180-day history is already covered", async () => {
+  const cfg = config(), store = new MemoryWithdrawalStorage();
+  await store.savePage(cfg.psmAddress.toLowerCase(), undefined, [], { ...state, mode: "head" });
+  let pages = 0;
+  const monitor = new WithdrawalMonitor(client, cfg, store, async () => ({ next_block: ++pages === 1 ? 75 : 101, data: [] }));
+  for (;;) {
+    await monitor.refresh();
+    const result = await monitor.result("180d");
+    assert.equal(result.complete, true, "old history is available throughout the head refresh");
+    if (result.complete && !result.syncPending) break;
+    assert.ok(pages < 3);
+  }
+  assert.equal(pages, 2);
+  assert.equal((await store.load(cfg.psmAddress.toLowerCase()))?.nextBlock, 101);
 });
