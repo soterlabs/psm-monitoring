@@ -10,7 +10,7 @@ import { HistoryMonitor } from "./history.js";
 import { Psm3Monitor } from "./psm3.js";
 import { SnapshotStore } from "./database.js";
 import { WithdrawalStore } from "./withdrawal-store.js";
-import { WithdrawalMonitor, withdrawalRanges, type WithdrawalRange } from "./withdrawals.js";
+import { WithdrawalMonitor, withdrawalRanges, withdrawalResponse, type WithdrawalRange } from "./withdrawals.js";
 import { safeErrorMessage } from "./errors.js";
 
 const config = loadConfig();
@@ -182,10 +182,8 @@ const server = createServer(async (request, response) => {
       return send(response, 400, "application/json; charset=utf-8", JSON.stringify({ error: { message: "Use 1d, 7d, 30d, 90d, or 180d" } }));
     }
     try {
-      let error: { message: string } | null = null;
-      try { await withdrawals.refresh(); } catch (cause) { error = { message: safeErrorMessage(cause) }; }
-      const snapshot = await withdrawals.result(requested as WithdrawalRange);
-      return send(response, snapshot.complete ? 200 : error ? 503 : 202, "application/json; charset=utf-8", JSON.stringify({ snapshot, error }));
+      const result = await withdrawalResponse(withdrawals, requested as WithdrawalRange);
+      return send(response, result.status, "application/json; charset=utf-8", JSON.stringify(result.body));
     } catch (cause) {
       return send(response, 503, "application/json; charset=utf-8", JSON.stringify({ snapshot: null, error: { message: safeErrorMessage(cause) } }));
     }

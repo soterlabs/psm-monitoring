@@ -1,6 +1,7 @@
 import { decodeEventLog, formatUnits, getAddress, parseAbiItem, toEventSelector, type PublicClient } from "viem";
 import { findBlockNearTimestamp } from "./chain.js";
 import type { Config } from "./config.js";
+import { safeErrorMessage } from "./errors.js";
 
 export const withdrawalRanges = ["1d", "7d", "30d", "90d", "180d"] as const;
 export type WithdrawalRange = typeof withdrawalRanges[number];
@@ -181,6 +182,7 @@ export async function fetchWithdrawalPage(psm: string, from: number, to: number,
 }
 
 export class WithdrawalMonitor {
+  lastError: { message: string; at: string } | undefined;
   private refreshing: Promise<void> | undefined;
   private reservePocket: string | undefined;
   constructor(private readonly client: PublicClient, private readonly config: Config,
@@ -189,7 +191,10 @@ export class WithdrawalMonitor {
 
   // One bounded page per request; incomplete backfills are never presented as rankings.
   async refresh(): Promise<void> {
-    this.refreshing ??= this.syncPage().finally(() => { this.refreshing = undefined; });
+    this.refreshing ??= this.syncPage().then(() => { this.lastError = undefined; }, error => {
+      this.lastError = { message: safeErrorMessage(error), at: new Date().toISOString() };
+      throw error;
+    }).finally(() => { this.refreshing = undefined; });
     return this.refreshing;
   }
 
@@ -266,4 +271,20 @@ export class WithdrawalMonitor {
         netWithdrawnUsdc: formatUnits(BigInt(row.amountRaw), 6), withdrawnUsdc: formatUnits(BigInt(row.withdrawnRaw), 6), replenishedUsdc: formatUnits(BigInt(row.replenishedRaw), 6), swaps: row.swaps, etherscanUrl: `https://etherscan.io/address/${row.address}` })),
     };
   }
+}
+
+// Cached windows stay usable while older history is indexed. Initial requests have
+// a bounded wait; refresh errors are captured even when the response returns first.
+export async function withdrawalResponse(monitor: WithdrawalMonitor, range: WithdrawalRange, waitMs = 8_000) {
+  const cached = await monitor.result(range);
+  const refresh = monitor.refresh().catch(() => undefined);
+  if (!cached.complete) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([refresh, new Promise<void>(resolve => { timer = setTimeout(resolve, waitMs); })]);
+    } finally { if (timer) clearTimeout(timer); }
+  }
+  const snapshot = cached.complete ? cached : await monitor.result(range);
+  const error = monitor.lastError ? { message: monitor.lastError.message } : null;
+  return { status: snapshot.complete ? 200 : error ? 503 : 202, body: { snapshot, error } };
 }

@@ -152,16 +152,16 @@ export class SnapshotStore implements SlackAlertStateStore {
       level: SlackAlertLevel;
       last_checked_at: Date;
       last_balance_usdc: string;
-      last_info_sent_at: Date;
+      last_info_sent_at: Date | null;
       last_circulating_supply: string | null;
-    }>(`SELECT level, last_checked_at, last_balance_usdc::text, last_info_sent_at, last_circulating_supply::text FROM slack_alert_state WHERE singleton = true`);
+    }>(`SELECT level, last_checked_at, last_balance_usdc::text, last_info_sent_at, last_circulating_supply::text FROM slack_ratio_alert_state WHERE singleton = true`);
     const row = result.rows[0];
     if (!row) return undefined;
     return {
       level: row.level,
       lastCheckedAt: row.last_checked_at.toISOString(),
       lastBalanceUsdc: row.last_balance_usdc,
-      lastInfoSentAt: row.last_info_sent_at.toISOString(),
+      ...(row.last_info_sent_at ? { lastInfoSentAt: row.last_info_sent_at.toISOString() } : {}),
       ...(row.last_circulating_supply ? { lastCirculatingSupply: row.last_circulating_supply } : {}),
     };
   }
@@ -169,7 +169,7 @@ export class SnapshotStore implements SlackAlertStateStore {
   async saveSlackAlertState(state: SlackAlertState): Promise<void> {
     await this.initialize();
     await this.pool.query(
-      `INSERT INTO slack_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_info_sent_at, last_circulating_supply)
+      `INSERT INTO slack_ratio_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_info_sent_at, last_circulating_supply)
        VALUES (true, $1, $2::timestamptz, $3::numeric, $4::timestamptz, $5::numeric)
        ON CONFLICT (singleton) DO UPDATE SET
          level = EXCLUDED.level,
@@ -212,15 +212,13 @@ export class SnapshotStore implements SlackAlertStateStore {
       CREATE TABLE IF NOT EXISTS slack_alert_state (
         singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
         level text NOT NULL CONSTRAINT slack_alert_state_level_check
-          CHECK (level IN ('healthy', 'below_30', 'below_28', 'below_25', 'below_20')),
+          CHECK (level IN ('healthy', 'below_4_0', 'below_3_9', 'below_3_8', 'below_3_7', 'below_3_6', 'below_3_5')),
         last_checked_at timestamptz NOT NULL,
         last_balance_usdc numeric(30, 6) NOT NULL,
         last_info_sent_at timestamptz NOT NULL DEFAULT now()
       );
       ALTER TABLE slack_alert_state
         ADD COLUMN IF NOT EXISTS last_info_sent_at timestamptz NOT NULL DEFAULT now();
-      ALTER TABLE slack_alert_state
-        ADD COLUMN IF NOT EXISTS last_circulating_supply numeric(40, 18);
       DO $migration$
       BEGIN
         IF EXISTS (
@@ -228,18 +226,32 @@ export class SnapshotStore implements SlackAlertStateStore {
             FROM pg_constraint
            WHERE conrelid = 'slack_alert_state'::regclass
              AND conname = 'slack_alert_state_level_check'
-             AND position('below_30' IN pg_get_constraintdef(oid)) = 0
+             AND position('below_4_0' IN pg_get_constraintdef(oid)) = 0
         ) THEN
           ALTER TABLE slack_alert_state DROP CONSTRAINT slack_alert_state_level_check;
-          -- Start ratio policy from the healthy band so its first check reports any
+          -- Start policy v2 from the healthy band so its first check reports any
           -- already-active threshold instead of silently adopting it.
           UPDATE slack_alert_state SET level = 'healthy';
           ALTER TABLE slack_alert_state
             ADD CONSTRAINT slack_alert_state_level_check
-            CHECK (level IN ('healthy', 'below_30', 'below_28', 'below_25', 'below_20'));
+            CHECK (level IN ('healthy', 'below_4_0', 'below_3_9', 'below_3_8', 'below_3_7', 'below_3_6', 'below_3_5'));
         END IF;
       END;
       $migration$;
+
+      CREATE TABLE IF NOT EXISTS slack_ratio_alert_state (
+        singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+        level text NOT NULL CHECK (level IN ('healthy', 'below_30', 'below_28', 'below_25', 'below_20')),
+        last_checked_at timestamptz NOT NULL,
+        last_balance_usdc numeric(30, 6) NOT NULL,
+        last_info_sent_at timestamptz,
+        last_circulating_supply numeric(40, 18)
+      );
+      -- Preserve delivery history once without changing the old worker's table or bands.
+      INSERT INTO slack_ratio_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_info_sent_at)
+        SELECT singleton, 'healthy', last_checked_at, last_balance_usdc, last_info_sent_at
+        FROM slack_alert_state
+      ON CONFLICT (singleton) DO NOTHING;
     `);
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK"); throw error; }

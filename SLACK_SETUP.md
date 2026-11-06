@@ -41,7 +41,7 @@ The greater-than-10M USDC consecutive-check drop note is retained. It is untagge
 
 The existing SFF wording is retained unless an actual Slack recipient is configured. To directly mention a group, set `SLACK_SFF_MENTION` on `slack-psm-alerts` to `<!subteam^S0123456789>`; for a user, use `<@U0123456789>`. Use a real ID for the intended SFF recipient. The mention is included only at 25% and 20%, alongside `@here`. Keep this variable preserved if importing/updating the Railway infrastructure declaration.
 
-On first startup with this policy, the database constraint migrates from the old absolute bands to `below_30`, `below_28`, `below_25`, and `below_20`. Legacy level state resets once to `healthy` so the first check reports any currently active ratio band without inventing an absolute-to-relative recovery. Previous checked balance and last information-message time are retained. Each new check also records its supply denominator. Subsequent restarts preserve the new band and do not repeat already-delivered threshold messages.
+On first startup, the ratio policy creates `slack_ratio_alert_state` separately from the legacy absolute-policy table. It seeds a healthy band with the previous checked balance and last information-message time so the first check reports any active ratio band without inventing an absolute-to-relative recovery. The old table and its accepted bands remain unchanged, so a still-running older worker can complete during rolling deployment. An information-message timestamp remains null until a message is actually delivered. Each new check records its supply denominator. Subsequent restarts preserve the ratio band and do not repeat already-delivered threshold messages.
 
 ## Verify safely
 

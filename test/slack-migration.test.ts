@@ -22,6 +22,9 @@ it("migrates absolute Slack bands once, preserving delivery times and recording 
     assert.equal(migrated?.level, "healthy");
     assert.equal(migrated?.lastInfoSentAt, "2026-11-06T00:00:00.000Z");
     assert.equal(migrated?.lastBalanceUsdc, "2400000000.000000");
+    const legacy = await admin.query(`SELECT level FROM ${schema}.slack_alert_state`);
+    assert.equal(legacy.rows[0].level, "below_3_8", "the absolute worker's state remains intact during rollout");
+    await admin.query(`UPDATE ${schema}.slack_alert_state SET level = 'below_3_5'`);
     await store.saveSlackAlertState({ ...migrated!, level: "below_25", lastCirculatingSupply: "10000000000.123456789012345678" });
     await store.close(); store = new SnapshotStore(url.toString());
     const restarted = await store.loadSlackAlertState();
@@ -31,5 +34,21 @@ it("migrates absolute Slack bands once, preserving delivery times and recording 
     await store?.close();
     await admin.query(`DROP SCHEMA ${schema} CASCADE`);
     await admin.end();
+  }
+});
+
+it("persists the first ratio check before any information message has been delivered", { skip: !databaseUrl }, async () => {
+  const schema = `slack_test_${randomBytes(6).toString("hex")}`;
+  const admin = new Pool({ connectionString: databaseUrl! });
+  const url = new URL(databaseUrl!); url.searchParams.set("options", `-c search_path=${schema}`);
+  let store: SnapshotStore | undefined;
+  try {
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    store = new SnapshotStore(url.toString());
+    await store.saveSlackAlertState({ level: "below_25", lastCheckedAt: "2026-11-06T12:00:00Z", lastBalanceUsdc: "2400000000", lastCirculatingSupply: "10000000000" });
+    const first = await store.loadSlackAlertState();
+    assert.equal(first?.level, "below_25"); assert.equal(first?.lastInfoSentAt, undefined);
+  } finally {
+    await store?.close(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.end();
   }
 });
