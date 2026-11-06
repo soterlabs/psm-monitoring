@@ -1,6 +1,7 @@
 import { createServer, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
-import { getAddress, parseUnits } from "viem";
+import { getAddress } from "viem";
+import { applyDailyTargets, TargetHistory } from "./target-history.js";
 import { loadConfig } from "./config.js";
 import { makeClient } from "./chain.js";
 import { dashboardHtml } from "./dashboard.js";
@@ -19,6 +20,7 @@ const client = makeClient(config);
 const store = SnapshotStore.fromEnvironment();
 const monitor = new Monitor(client, config);
 const history = new HistoryMonitor(client, config, store);
+const targetHistory = new TargetHistory(store);
 const directExposure = new DirectExposureMonitor(store);
 const psm3 = new Psm3Monitor();
 const withdrawalStore = WithdrawalStore.fromEnvironment();
@@ -125,6 +127,7 @@ async function refreshPsm3(): Promise<void> {
 
 async function refreshHistory(): Promise<void> {
   historyRefresh ??= (async () => {
+    await targetHistory.refresh();
     await refreshReserve();
     if (monitor.snapshot) await history.load(getAddress(monitor.snapshot.pocketAddress), false);
   })().finally(() => { historyRefresh = undefined; });
@@ -161,20 +164,11 @@ const server = createServer(async (request, response) => {
     const requested = url.searchParams.get("range");
     const range = requested === "7d" || requested === "30d" || requested === "180d" || requested === "monthly" ? requested : "90d";
     const storedSeries = history.series.get(range);
-    const current = monitor.snapshot;
-    const targetRaw = current ? parseUnits(current.limitUsdc, 6) : undefined;
-    // Historical balances remain unchanged. Their comparison line uses today's
-    // target explicitly, rather than presenting it as historical circulating supply.
-    const series = storedSeries && current && targetRaw ? {
-      ...storedSeries, limitUsdc: current.limitUsdc, targetPercent: current.targetPercent,
-      targetBasis: "latest_circulating_supply", supplyCheckedAt: current.supplyCheckedAt,
-      points: storedSeries.points.map(point => ({ ...point,
-        utilizationPercent: Number(parseUnits(point.balanceUsdc, 6) * 1_000_000n / targetRaw) / 10_000 })),
-    } : null;
+    const series = storedSeries ? applyDailyTargets(storedSeries, targetHistory.targets) : null;
     return send(response, 200, "application/json; charset=utf-8", `${JSON.stringify({
       loading: history.loading,
       series,
-      error: history.lastError ?? monitor.lastError ?? null,
+      error: history.lastError ?? targetHistory.lastError ?? monitor.lastError ?? null,
     })}\n`);
   }
   if (path === "/api/direct-exposure") {

@@ -11,9 +11,14 @@ try {
   const monitor = new WithdrawalMonitor(makeClient(config), config, store);
   do {
     await monitor.refresh();
+    if (monitor.retryAt && Date.parse(monitor.retryAt) > Date.now()) {
+      console.log(JSON.stringify({ event: "withdrawal_index_deferred", retryAt: monitor.retryAt }));
+      break;
+    }
     const result = await monitor.result("180d");
     console.log(JSON.stringify({ event: "withdrawal_index_progress", indexedPercent: result.indexedPercent, asOf: result.asOf }));
-    if (result.complete) break;
+    // Historical coverage can be complete while a paginated head refresh is not.
+    if (result.complete && !result.syncPending) break;
     await new Promise(resolve => setTimeout(resolve, 1000));
   } while (true);
 } catch (error) {

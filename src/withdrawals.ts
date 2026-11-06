@@ -2,6 +2,7 @@ import { decodeEventLog, formatUnits, getAddress, parseAbiItem, toEventSelector,
 import { findBlockNearTimestamp } from "./chain.js";
 import type { Config } from "./config.js";
 import { safeErrorMessage } from "./errors.js";
+import { WithdrawalRateLimitError, withdrawalRetryAt, type WithdrawalRefreshState } from "./withdrawal-rate-limit.js";
 
 export const withdrawalRanges = ["1d", "7d", "30d", "90d", "180d"] as const;
 export type WithdrawalRange = typeof withdrawalRanges[number];
@@ -51,9 +52,14 @@ export interface WithdrawalStorage {
   savePage(psm: string, expectedNextBlock: number | undefined, events: WithdrawalEvent[], state: WithdrawalIndexState): Promise<void>;
   totals(psm: string, from: string, through: string): Promise<WithdrawalTotal[]>;
   close(): Promise<void>;
+  withRefreshLock?(psm: string, operation: () => Promise<void>): Promise<void>;
+  loadRefreshState?(psm: string): Promise<WithdrawalRefreshState | undefined>;
+  saveRefreshState?(psm: string, state: WithdrawalRefreshState): Promise<void>;
 }
 
 export class MemoryWithdrawalStorage implements WithdrawalStorage {
+  private readonly refreshStates = new Map<string, WithdrawalRefreshState>();
+  private readonly refreshLocks = new Set<string>();
   private readonly states = new Map<string, WithdrawalIndexState>();
   private readonly events = new Map<string, Map<string, WithdrawalEvent>>();
   async load(psm: string): Promise<WithdrawalIndexState | undefined> { return this.states.get(psm); }
@@ -79,6 +85,13 @@ export class MemoryWithdrawalStorage implements WithdrawalStorage {
       .sort(compareWithdrawalTotals).slice(0, 20);
   }
   async close(): Promise<void> {}
+  async loadRefreshState(psm: string) { return this.refreshStates.get(psm); }
+  async saveRefreshState(psm: string, state: WithdrawalRefreshState) { this.refreshStates.set(psm, state); }
+  async withRefreshLock(psm: string, operation: () => Promise<void>) {
+    if (this.refreshLocks.has(psm)) return;
+    this.refreshLocks.add(psm);
+    try { await operation(); } finally { this.refreshLocks.delete(psm); }
+  }
 }
 
 export function compareWithdrawalTotals(a: WithdrawalTotal, b: WithdrawalTotal): number {
@@ -146,7 +159,7 @@ export function decodeWithdrawalPage(page: WithdrawalPage, psm: string, from: nu
   return rows;
 }
 
-export async function fetchWithdrawalPage(psm: string, from: number, to: number, pocket: string, usdc: string): Promise<WithdrawalPage> {
+export async function fetchWithdrawalPage(psm: string, from: number, to: number, pocket: string, usdc: string, requestPage: typeof fetch = fetch): Promise<WithdrawalPage> {
   const token = process.env.ENVIO_API_TOKEN;
   if (!token) throw new Error("Withdrawal indexing requires ENVIO_API_TOKEN");
   const request: RequestInit = {
@@ -167,22 +180,19 @@ export async function fetchWithdrawalPage(psm: string, from: number, to: number,
       max_num_logs: 25_000, max_num_blocks: 25_000, max_num_transactions: 100_000,
     }),
   };
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const response = await fetch("https://eth.hypersync.xyz/query", { ...request, signal: AbortSignal.timeout(25_000) });
-    if (response.status === 429 && attempt < 2) {
-      const seconds = Number(response.headers.get("retry-after") ?? attempt + 1);
-      await response.body?.cancel();
-      await new Promise(resolve => setTimeout(resolve, Math.min(5, Math.max(1, Number.isFinite(seconds) ? seconds : 1)) * 1000));
-      continue;
-    }
-    if (!response.ok) throw new Error(`Withdrawal index request failed (${response.status})`);
-    return await response.json() as WithdrawalPage;
+  const response = await requestPage("https://eth.hypersync.xyz/query", { ...request, signal: AbortSignal.timeout(25_000) });
+  if (!response.ok) {
+    await response.body?.cancel();
+    if (response.status === 429) throw new WithdrawalRateLimitError(response.headers.get("retry-after"));
+    throw new Error(`Withdrawal index request failed (${response.status})`);
   }
-  throw new Error("Withdrawal index rate limited");
+  return await response.json() as WithdrawalPage;
 }
 
 export class WithdrawalMonitor {
-  lastError: { message: string; at: string } | undefined;
+  lastError: { message: string; at: string; code?: "rate_limited" } | undefined;
+  retryAt: string | undefined;
+  private refreshState: WithdrawalRefreshState | undefined;
   private refreshing: Promise<void> | undefined;
   private reservePocket: string | undefined;
   constructor(private readonly client: PublicClient, private readonly config: Config,
@@ -191,11 +201,37 @@ export class WithdrawalMonitor {
 
   // One bounded page per request; incomplete backfills are never presented as rankings.
   async refresh(): Promise<void> {
-    this.refreshing ??= this.syncPage().then(() => { this.lastError = undefined; }, error => {
-      this.lastError = { message: safeErrorMessage(error), at: new Date().toISOString() };
-      throw error;
-    }).finally(() => { this.refreshing = undefined; });
+    const psm = this.config.psmAddress.toLowerCase();
+    this.refreshing ??= (this.storage.withRefreshLock
+      ? this.storage.withRefreshLock(psm, () => this.refreshLocked(psm))
+      : this.refreshLocked(psm)).catch(error => {
+        if (!(error instanceof WithdrawalRateLimitError)) this.lastError = { message: safeErrorMessage(error), at: new Date().toISOString() };
+        throw error;
+      }).finally(() => { this.refreshing = undefined; });
     return this.refreshing;
+  }
+
+  private async refreshLocked(psm: string): Promise<void> {
+    this.refreshState = await this.storage.loadRefreshState?.(psm) ?? this.refreshState;
+    this.lastError = this.refreshState?.error ?? undefined;
+    this.retryAt = this.refreshState?.retryAt ?? undefined;
+    if (this.retryAt && Date.parse(this.retryAt) > Date.now()) return;
+    try {
+      await this.syncPage();
+      this.refreshState = { retryAt: null, failures: 0, error: null };
+      await this.storage.saveRefreshState?.(psm, this.refreshState);
+      this.lastError = undefined; this.retryAt = undefined;
+    } catch (error) {
+      this.lastError = { message: safeErrorMessage(error), at: new Date().toISOString(),
+        ...(error instanceof WithdrawalRateLimitError ? { code: "rate_limited" as const } : {}) };
+      if (error instanceof WithdrawalRateLimitError) {
+        const failures = (this.refreshState?.failures ?? 0) + 1;
+        this.retryAt = withdrawalRetryAt(error.retryAfter, failures);
+        this.refreshState = { retryAt: this.retryAt, failures, error: this.lastError };
+        await this.storage.saveRefreshState?.(psm, this.refreshState);
+      }
+      throw error;
+    }
   }
 
   private async syncPage(): Promise<void> {
@@ -258,13 +294,24 @@ export class WithdrawalMonitor {
   }
 
   async result(range: WithdrawalRange) {
-    const state = await this.storage.load(this.config.psmAddress.toLowerCase());
+    const wasRefreshing = Boolean(this.refreshing);
+    const psm = this.config.psmAddress.toLowerCase();
+    const [state, sharedRefresh] = await Promise.all([
+      this.storage.load(psm), this.storage.loadRefreshState?.(psm),
+    ]);
+    // Read shared recovery before serving cached rankings, without waiting for a
+    // provider request or overwriting an in-flight refresh's local error state.
+    if (!wasRefreshing && !this.refreshing && sharedRefresh) {
+      if (sharedRefresh.error || this.lastError?.code === "rate_limited") this.lastError = sharedRefresh.error ?? undefined;
+      this.retryAt = sharedRefresh.retryAt ?? undefined;
+    }
     const asOf = state?.throughTimestamp;
     const from = asOf ? new Date(Date.parse(asOf) - Number(range.slice(0, -1)) * 86400_000).toISOString() : undefined;
     const covered = from && state && state.startTimestamp <= from;
     const rows = covered ? await this.storage.totals(this.config.psmAddress.toLowerCase(), from, asOf!) : [];
     return {
       range, complete: Boolean(covered), asOf: asOf ?? null, from: from ?? null,
+      syncPending: Boolean(state && state.nextBlock <= state.targetBlock),
       indexedPercent: state ? Math.min(100, Math.max(0, (Date.parse(state.throughTimestamp) - Date.parse(state.startTimestamp)) / (Number(range.slice(0, -1)) * 86400_000) * 100)) : 0,
       attribution: "Net USDC withdrawn minus replenished per reserve counterparty. Canonical USDS wrapper deposits credited to their funding caller; other routers can represent multiple users.",
       rows: rows.map((row, index) => ({ rank: index + 1, address: getAddress(row.address), label: withdrawalLabels[row.address.toLowerCase()] ?? null,
@@ -285,6 +332,6 @@ export async function withdrawalResponse(monitor: WithdrawalMonitor, range: With
     } finally { if (timer) clearTimeout(timer); }
   }
   const snapshot = cached.complete ? cached : await monitor.result(range);
-  const error = monitor.lastError ? { message: monitor.lastError.message } : null;
-  return { status: snapshot.complete ? 200 : error ? 503 : 202, body: { snapshot, error } };
+  const error = monitor.lastError ? { ...monitor.lastError } : null;
+  return { status: snapshot.complete ? 200 : error ? 503 : 202, body: { snapshot, error, retryAt: monitor.retryAt ?? null } };
 }

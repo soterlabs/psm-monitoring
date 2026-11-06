@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import type { DailyTarget } from "./target-history.js";
 import type { DirectExposurePoint, HistoryPoint } from "./types.js";
 import type { SlackAlertLevel, SlackAlertState, SlackAlertStateStore } from "./slack-alerts.js";
 
@@ -64,6 +65,35 @@ export class SnapshotStore implements SlackAlertStateStore {
     } finally {
       client.release();
     }
+  }
+
+  async saveDailyTargets(points: DailyTarget[]): Promise<void> {
+    await this.initialize();
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const point of points) await client.query(
+        `INSERT INTO psm_daily_targets (sample_date, circulating_supply, target_usdc, checked_at, source, provisional)
+         VALUES ($1::date, $2::numeric, $3::numeric, $4::timestamptz, $5, $6)
+         ON CONFLICT (sample_date) DO UPDATE SET circulating_supply = EXCLUDED.circulating_supply,
+           target_usdc = EXCLUDED.target_usdc, checked_at = EXCLUDED.checked_at,
+           source = EXCLUDED.source, provisional = EXCLUDED.provisional
+         WHERE EXCLUDED.checked_at >= psm_daily_targets.checked_at`,
+        [point.date, point.circulatingSupply, point.targetUsdc, point.checkedAt, point.source, point.provisional]);
+      await client.query("COMMIT");
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
+  }
+
+  async loadDailyTargets(): Promise<DailyTarget[]> {
+    await this.initialize();
+    const result = await this.pool.query<{
+      date: string; circulating_supply: string; target_usdc: string;
+      checked_at: Date; source: string; provisional: boolean;
+    }>(`SELECT to_char(sample_date, 'YYYY-MM-DD') AS date, circulating_supply::text,
+        target_usdc::text, checked_at, source, provisional FROM psm_daily_targets ORDER BY sample_date`);
+    return result.rows.map(row => ({ date: row.date, circulatingSupply: row.circulating_supply,
+      targetUsdc: row.target_usdc, checkedAt: row.checked_at.toISOString(), source: row.source, provisional: row.provisional }));
   }
 
   async loadHistory(): Promise<StoredHistory | undefined> {
@@ -208,6 +238,15 @@ export class SnapshotStore implements SlackAlertStateStore {
         total_usd double precision NOT NULL,
         venues jsonb NOT NULL,
         updated_at timestamptz NOT NULL DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS psm_daily_targets (
+        sample_date date PRIMARY KEY CHECK (sample_date >= DATE '2026-11-04'),
+        circulating_supply numeric(40,18) NOT NULL CHECK (circulating_supply > 0),
+        target_usdc numeric(30,6) NOT NULL CHECK (target_usdc > 0),
+        checked_at timestamptz NOT NULL,
+        source text NOT NULL,
+        provisional boolean NOT NULL,
+        CHECK (target_usdc = ceil(circulating_supply * 0.30 * 1000000) / 1000000)
       );
       CREATE TABLE IF NOT EXISTS slack_alert_state (
         singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
