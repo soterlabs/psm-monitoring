@@ -5,6 +5,29 @@ export interface CirculatingSupply {
   supplyCheckedAt: string;
 }
 
+export const RESERVE_TARGET_PERCENT = 30;
+export type ReserveBand = "healthy" | "below_30" | "below_28" | "below_25" | "below_20";
+
+export function reserveTargetRaw(circulatingSupply: string): bigint {
+  const denominator = 100n * 10n ** 12n;
+  // Round the target up to a whole micro-USDC, preserving the exact 30% floor.
+  return (supplyRaw(circulatingSupply) * BigInt(RESERVE_TARGET_PERCENT) + denominator - 1n) / denominator;
+}
+
+export function reserveRatioPercent(balanceUsdc: string, circulatingSupply: string): number {
+  return Number(parseUnits(balanceUsdc, 6) * 10n ** 12n * 100_000_000n / supplyRaw(circulatingSupply)) / 1_000_000;
+}
+
+export function reserveBand(balanceUsdc: string, circulatingSupply: string): ReserveBand {
+  const balance = parseUnits(balanceUsdc, 6) * 10n ** 12n;
+  const supply = supplyRaw(circulatingSupply);
+  if (balance < 0n) throw new Error("PSM balance must not be negative");
+  for (const threshold of [20, 25, 28, 30] as const) {
+    if (balance * 100n < supply * BigInt(threshold)) return `below_${threshold}`;
+  }
+  return "healthy";
+}
+
 export function supplyRaw(value: string, positive = true): bigint {
   if (!/^\d+(\.\d{1,18})?$/.test(value)) throw new Error("Circulating supply must be a positive decimal with at most 18 decimals");
   const raw = parseUnits(value, 18);

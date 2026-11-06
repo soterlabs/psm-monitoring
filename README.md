@@ -2,7 +2,7 @@
 
 Live, read-only monitoring for the [Sky LitePSM USDC-A](https://etherscan.io/address/0xf6e72Db5454dd049d0788e411b06CfAF16853042) on Ethereum mainnet.
 
-**Live dashboard:** [psm-monitoring-production.up.railway.app](https://psm-monitoring-production.up.railway.app)
+**Live dashboard:** [psm.soterlabs.com](https://psm.soterlabs.com)
 
 The service reads the PSM's configured `pocket()` and `gem()` on-chain, verifies that the gem is Ethereum USDC, and adds:
 
@@ -10,16 +10,11 @@ The service reads the PSM's configured `pocket()` and `gem()` on-chain, verifies
 USDC.balanceOf(pocket) + USDC.balanceOf(PSM)
 ```
 
-It compares that balance with a 4 billion USDC minimum target. Defaults are:
-
-- `healthy` (green): 100% or more
-- `warning` (yellow): 95% to below 100%
-- `critical` (orange): 90% to below 95%
-- `low` (red): below 90%
+The live reserve target is **30% of circulating USDS + DAI**. The reserve card and headline cards show the current reserve/supply ratio, the computed USDC target, and the surplus or shortfall against that target. They use the same exact ratio bands as Slack: healthy at or above 30%, warning from 28% to below 30%, critical from 25% to below 28%, and low below 25%, with an action-needed indication below 20%. A supply refresh failure marks the combined reading stale; the dashboard does not substitute a fixed 4B target.
 
 The dashboard charts daily on-chain snapshots for the last 7, 30, 90, or 180 days and monthly snapshots from January 2025 onward. A Railway cron service refreshes both chart datasets every day at 02:15 UTC and upserts them into Railway Postgres. The web process loads history from Postgres on request; on an empty database it reconstructs and seeds the history automatically, with archive RPC reads as the storage fallback.
 
-Between the reserve and refill-capacity sections, **Top net USDC withdrawers** ranks the 20 addresses with the largest positive **USDC withdrawn minus USDC replenished** over rolling 1, 7, 30, 90, or 180 days. Amounts are summed exactly before sorting and display rounding. Net suppliers and addresses that fully replenished their withdrawals are omitted. Amount tooltips show gross withdrawals and replenishments separately. Each proxy remains a separate address, with labels checked against [Spark's Ethereum registry](https://github.com/sparkdotfi/spark-address-registry/blob/master/src/Ethereum.sol) and [Grove's registry](https://github.com/grove-labs/grove-address-registry/blob/master/src/Ethereum.sol).
+Between the reserve and refill-capacity sections, **Top net USDC withdrawers** ranks the 20 addresses with the largest positive **USDC withdrawn minus USDC replenished** over rolling 1, 7, 30, 90, or 180 days. Amounts are summed exactly before sorting and displayed rounded to whole USDC; tooltips retain exact amounts. Full addresses link to Etherscan and a separate Label column retains known identities. Net suppliers and addresses that fully replenished their withdrawals are omitted. Amount tooltips show gross withdrawals and replenishments separately. Optional `ETHERSCAN_API_KEY` enriches unlabeled addresses with verified contract names in the background. These appear with a `Contract:` prefix and are code metadata, not ownership tags; generic proxy names and unverified addresses stay unlabeled. Results are cached for 24 hours (five minutes after provider failure), and lookup failures do not delay or fail rankings. The supplied API plan does not include Etherscan’s separate Pro Plus public-name-tag endpoint. Each proxy remains a separate address, with labels checked against [Spark's Ethereum registry](https://github.com/sparkdotfi/spark-address-registry/blob/master/src/Ethereum.sol) and [Grove's registry](https://github.com/grove-labs/grove-address-registry/blob/master/src/Ethereum.sol).
 
 Net flow indexing uses canonical USDC `Transfer` events into and out of the LitePSM pocket and contract; transfers within that reserve pair are excluded. Counterparties are the USDC recipients and funding addresses. The canonical USDS wrapper pulls USDC from its caller before forwarding it to the pocket: chronological wrapper funding is attributed to that caller, so ALM proxies receive credit for their replenishments. Unmatched wrapper inventory remains attributed to the wrapper. Other routers can represent multiple users; the ranking does not infer ultimate beneficial ownership or merge related addresses.
 
@@ -67,9 +62,9 @@ npm run build
 
 The repository includes a production `Dockerfile` and Railway infrastructure-as-code in `.railway/railway.ts`. It declares a serverless web service, persistent Postgres, the `daily-snapshots` cron, and the ten-minute Slack alert cron. The web service performs no background polling: dashboard and API requests refresh live readings on demand, allowing Railway to sleep it while unused. The first request after sleep may require a retry during Railway's cold start. Set `ETH_RPC` on the web service and run `railway config apply`; the workers reference the required secrets. Railway supplies `PORT` automatically.
 
-For withdrawal rankings, also set `ENVIO_API_TOKEN` on the web service. The infrastructure declaration adds `psm-withdrawals`, a ten-minute cron running `npm run withdrawals:sync`, with references to the same RPC, token and database. On first deployment the worker backfills 180 days; subsequent runs catch up to the latest finalized block. Covered rankings return immediately while indexing refreshes in the background. Initial requests wait at most eight seconds before returning a loading response; later requests resume the same in-flight work. Provider throttling retries briefly; if it persists, the next request or cron resumes at the last committed cursor. To seed manually, build the project and run `npm run withdrawals:sync` with those three variables available. No production database credentials or indexer tokens belong in source control.
+For withdrawal rankings, also set `ENVIO_API_TOKEN` on the web service. Optional `ETHERSCAN_API_KEY` belongs only on the web service for server-side contract-name enrichment. The infrastructure declaration adds `psm-withdrawals`, a ten-minute cron running `npm run withdrawals:sync`, with references to the same RPC, token and database. On first deployment the worker backfills 180 days; subsequent runs catch up to the latest finalized block. Covered rankings return immediately while indexing refreshes in the background. Initial requests wait at most eight seconds before returning a loading response; later requests resume the same in-flight work. Provider throttling retries briefly; if it persists, the next request or cron resumes at the last committed cursor. To seed manually, build the project and run `npm run withdrawals:sync` with those three variables available. No production database credentials or indexer tokens belong in source control.
 
-Slack policy uses the PSM USDC reserve divided by **circulating USDS + DAI**, fetched for each check from [BA Labs' Sky supply API](https://sky.data.blockanalitica.com/internal/supply/). This differs from raw USDS issuance and sUSDS vault TVL. It also differs from the dashboard's separately configured `LIMIT_USDC` operational target. Invalid or unavailable supply stops that alert check without advancing its state; no cached denominator is substituted.
+Slack policy uses the PSM USDC reserve divided by **circulating USDS + DAI**, fetched for each check from [BA Labs' Sky supply API](https://sky.data.blockanalitica.com/internal/supply/). This differs from raw USDS issuance and sUSDS vault TVL. The same denominator determines the dashboard’s 30% target and headline ratios. The history chart compares past USDC balances against the current target, explicitly labeled as a current reference rather than a reconstruction of historical circulating supply. Invalid or unavailable supply stops that alert check without advancing its state; no cached denominator is substituted.
 
 Optional Slack alerting uses an Incoming Webhook:
 
@@ -86,11 +81,12 @@ The dedicated `slack-psm-alerts` Railway cron evaluates the reserve ratio every 
 | --- | --- | --- | --- |
 | `ETH_RPC` | yes | — | Ethereum mainnet JSON-RPC URL |
 | `ENVIO_API_TOKEN` | required for withdrawal rankings | — | Envio HyperSync token for the web service and withdrawal indexing worker |
+| `ETHERSCAN_API_KEY` | no | — | Server-side verified contract names for the Label column; public nametags need Pro Plus access |
 | `PSM_ADDRESS` | no | `0xf6e72...53042` | LitePSM contract |
 | `USDC_ADDRESS` | no | `0xA0b869...6eB48` | Expected gem/token |
-| `LIMIT_USDC` | no | `4000000000` | Minimum healthy target |
-| `YELLOW_PERCENT` | no | `95` | Yellow threshold below target |
-| `ORANGE_PERCENT` | no | `90` | Orange threshold; lower values are red |
+| `LIMIT_USDC` | no | `4000000000` | Legacy history-generation comparison only; live target and alerts use 30% of circulating supply |
+| `YELLOW_PERCENT` | no | `95` | Legacy history-generation setting; live warning begins below 30% of supply |
+| `ORANGE_PERCENT` | no | `90` | Legacy history-generation setting; live critical begins below 28% of supply |
 | `POLL_INTERVAL_SECONDS` | no | `60` | On-chain polling cadence; minimum 10 |
 | `STALE_AFTER_SECONDS` | no | `180` | Reading age that fails readiness |
 | `SLACK_WEBHOOK_URL` | no | — | Secret Slack Incoming Webhook URL |

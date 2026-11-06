@@ -2,7 +2,7 @@
 
 ## Objective
 
-Detect when USDC controlled by Ethereum Sky LitePSM USDC-A falls below the configured 4,000,000,000 USDC minimum target, while also detecting stale or invalid monitoring data.
+Detect when USDC controlled by Ethereum Sky LitePSM USDC-A falls below 30% of circulating USDS + DAI, while also detecting stale or invalid monitoring data.
 
 ## Signal and scope
 
@@ -11,24 +11,26 @@ The ten-minute Slack cron and on-demand dashboard refreshes each read one Ethere
 1. Reads `pocket()` and `gem()` from LitePSM `0xf6e72Db5454dd049d0788e411b06CfAF16853042`.
 2. Confirms the chain ID is Ethereum mainnet (`1`) and `gem()` is canonical USDC `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48`.
 3. Calculates `USDC.balanceOf(pocket) + USDC.balanceOf(PSM)` at that same block.
-4. Compares the aggregate balance to the configured limit.
+4. Fetches circulating USDS + DAI and compares the aggregate balance with its 30% target.
 
 The pocket is included because the [LitePSM design](https://github.com/sky-ecosystem/dss-lite-psm) intentionally keeps gem liquidity in a separate `pocket` address. Looking only at the PSM contract would normally report zero USDC and miss the exposure.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the contract-by-contract flow and the role of the USDS wrapper.
 
-The 4B value is a minimum operational target supplied for this monitor. A balance at or above it is healthy. It is not inferred from, and should not be confused with, Sky's mutable on-chain debt-ceiling parameters.
+The live operational target is 30% of circulating USDS + DAI, fetched from the same supply source used by Slack. This is independent of the onchain debt ceiling. The dashboard shows the reserve/supply ratio, current USDC target and resulting surplus/shortfall. The historical balance chart’s dashed line is the current target, not a historical circulating-supply reconstruction.
+
+| Status | USDC reserve / circulating USDS + DAI | Operational meaning |
+| --- | --- | --- |
+| `healthy` (green) | ≥30% | Target met |
+| `warning` (yellow) | ≥28% and <30% | Below target |
+| `critical` (orange) | ≥25% and <28% | Reduced reserve coverage |
+| `low` (red) | <25% | Important alert; action needed below 20% |
+
+Supply-read failures mark the combined reading stale; no absolute-target fallback is applied.
 
 ## Thresholds
 
-| State | Default condition | Action |
-| --- | --- | --- |
-| `healthy` (green) | `≥ 4.0B` (`≥100%`) | No action |
-| `warning` (yellow) | `3.8B–<4.0B` (`95–<100%`) | Review the balance trend and planned flows |
-| `critical` (orange) | `3.6B–<3.8B` (`90–<95%`) | Notify the responsible risk/operator channel and prepare mitigation |
-| `low` (red) | `< 3.6B` (`<90%`) | Escalate immediately; validate the reading independently and execute the approved response playbook |
-
-Threshold percentages and the limit are environment-configurable. Changing them should be reviewed like a monitoring-policy change.
+The percentage bands above are fixed policy shared by the dashboard and Slack. The denominator is refreshed for each live reading. Legacy absolute-limit environment settings do not override the live target.
 
 ## Delivery and reliability
 
@@ -37,7 +39,7 @@ Threshold percentages and the limit are environment-configurable. Changing them 
 - Railway's `daily-snapshots` cron runs at 02:15 UTC. It rebuilds both the LitePSM and SDE time series, then transactionally upserts date-keyed snapshots into Railway Postgres; reruns are idempotent. The serverless web service reads this durable history when requested.
 - An empty database is seeded automatically by the web service. If Postgres is unavailable, the dashboard falls back to live reconstruction instead of losing history availability. Ethereum reconstruction requires an archive-capable RPC.
 - `/metrics` provides balance, limit, utilization, freshness, last-success time, and RPC-error metrics for external alerting.
-- A dedicated Railway cron checks the USDC reserve as a share of circulating USDS + DAI every ten minutes. Below 30% and 28% it sends untagged messages; below 25% it tags `@here` and calls for SFF internal reaction; below 20% it sends `🚨 ACTION NEEDED` with `@here` and an urgent SFF refill callout. The denominator is fetched afresh from the Sky supply API; failed reads do not advance state. Optional `SLACK_SFF_MENTION` adds an actual SFF user/group mention. Twelve-hour untagged updates, full recovery to 30%, and the untagged greater-than-10M consecutive-check drop note are retained. These Slack ratios are separate from the dashboard's `LIMIT_USDC` bands. See [SLACK_SETUP.md](SLACK_SETUP.md).
+- A dedicated Railway cron checks the USDC reserve as a share of circulating USDS + DAI every ten minutes. Below 30% and 28% it sends untagged messages; below 25% it tags `@here` and calls for SFF internal reaction; below 20% it sends `🚨 ACTION NEEDED` with `@here` and an urgent SFF refill callout. The denominator is fetched afresh from the Sky supply API; failed reads do not advance state. Optional `SLACK_SFF_MENTION` adds an actual SFF user/group mention. Twelve-hour untagged updates, full recovery to 30%, and the untagged greater-than-10M consecutive-check drop note are retained. The dashboard uses the same circulating-supply denominator and ratio bands. See [SLACK_SETUP.md](SLACK_SETUP.md).
 - The web service has no background polling and can sleep while the dashboard is unused. Dashboard/API traffic refreshes live readings on demand; a cold first request may need a retry while Railway wakes the container.
 - A failed RPC read preserves the last good value and records the error; the next dashboard/API request retries it.
 - `/readyz` fails when there is no successful reading or it is older than 180 seconds. `/healthz` only confirms the process is alive.
