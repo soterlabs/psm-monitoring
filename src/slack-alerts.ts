@@ -1,7 +1,10 @@
-import { parseUnits } from "viem";
+import { formatUnits, parseUnits } from "viem";
 import type { StatusSnapshot } from "./types.js";
+import { supplyRaw, type CirculatingSupply } from "./supply.js";
 
-export const slackAlertLevels = ["healthy", "below_4_0", "below_3_9", "below_3_8", "below_3_7", "below_3_6", "below_3_5"] as const;
+export type SlackAlertSnapshot = StatusSnapshot & CirculatingSupply;
+
+export const slackAlertLevels = ["healthy", "below_30", "below_28", "below_25", "below_20"] as const;
 export type SlackAlertLevel = (typeof slackAlertLevels)[number];
 
 export interface SlackAlertState {
@@ -9,6 +12,7 @@ export interface SlackAlertState {
   lastCheckedAt: string;
   lastBalanceUsdc: string;
   lastInfoSentAt?: string;
+  lastCirculatingSupply?: string;
 }
 
 export interface SlackAlertStateStore {
@@ -18,16 +22,9 @@ export interface SlackAlertStateStore {
 
 export interface SlackAlertConfig {
   webhookUrl?: string;
+  sffMention?: string;
 }
 
-const THRESHOLDS = {
-  four: parseUnits("4000000000", 6),
-  threeNine: parseUnits("3900000000", 6),
-  threeEight: parseUnits("3800000000", 6),
-  threeSeven: parseUnits("3700000000", 6),
-  threeSix: parseUnits("3600000000", 6),
-  threeFive: parseUnits("3500000000", 6),
-};
 const LARGE_DROP_RAW = parseUnits("10000000", 6);
 const CRON_START_TOLERANCE_MS = 120_000;
 const INFORMATION_INTERVAL_MS = 12 * 60 * 60 * 1_000;
@@ -35,15 +32,18 @@ const SEVERITY: Record<SlackAlertLevel, number> = Object.fromEntries(
   slackAlertLevels.map((level, index) => [level, index]),
 ) as Record<SlackAlertLevel, number>;
 
-export function slackAlertLevel(balanceUsdc: string): SlackAlertLevel {
-  const balance = parseUnits(balanceUsdc, 6);
-  if (balance < THRESHOLDS.threeFive) return "below_3_5";
-  if (balance < THRESHOLDS.threeSix) return "below_3_6";
-  if (balance < THRESHOLDS.threeSeven) return "below_3_7";
-  if (balance < THRESHOLDS.threeEight) return "below_3_8";
-  if (balance < THRESHOLDS.threeNine) return "below_3_9";
-  if (balance < THRESHOLDS.four) return "below_4_0";
+export function slackAlertLevel(balanceUsdc: string, circulatingSupply: string): SlackAlertLevel {
+  const balance = parseUnits(balanceUsdc, 6) * 10n ** 12n;
+  const supply = supplyRaw(circulatingSupply);
+  if (balance < 0n) throw new Error("PSM balance must not be negative");
+  for (const threshold of [20, 25, 28, 30] as const) {
+    if (balance * 100n < supply * BigInt(threshold)) return `below_${threshold}`;
+  }
   return "healthy";
+}
+
+function coverage(snapshot: SlackAlertSnapshot): string {
+  return `${formatUnits(parseUnits(snapshot.totalBalanceUsdc, 6) * 10n ** 12n * 100_000_000n / supplyRaw(snapshot.circulatingSupply), 6)}%`;
 }
 
 function displayBalance(balanceUsdc: string): string {
@@ -55,35 +55,33 @@ function displayDrop(dropRaw: bigint): string {
 }
 
 export function slackMessage(
-  snapshot: StatusSnapshot,
+  snapshot: SlackAlertSnapshot,
   level: SlackAlertLevel,
   recovery = false,
   dropRaw = 0n,
+  sffMention?: string,
 ): { text: string; blocks: unknown[] } {
   const balance = displayBalance(snapshot.totalBalanceUsdc);
-  const details = `Balance: *${balance}* · Ethereum block: \`${snapshot.blockNumber}\``;
+  const details = `Reserve ratio: *${coverage(snapshot)}* of circulating USDS + DAI.\nBalance: *${balance}* · Circulating supply: *${(Number(snapshot.circulatingSupply) / 1e9).toFixed(3)}B* · Ethereum block: \`${snapshot.blockNumber}\`\nSupply checked: ${snapshot.supplyCheckedAt}`;
+  const sff = sffMention ? `${sffMention} (SFF)` : "SFF";
   let title: string;
   let message: string;
 
   if (recovery) {
     title = "✅ PSM balance recovered";
-    message = `The PSM balance is back at or above 4.0B USDC.\n${details}`;
-  } else if (level === "below_3_5") {
+    message = `The PSM USDC balance is back at or above 30% of circulating USDS + DAI.\n${details}`;
+  } else if (level === "below_20") {
     title = "🚨 ACTION NEEDED";
-    message = `<!here> The PSM balance crossed below 3.5B USDC. SFF should be notified urgently that the PSM should be refilled.\n${details}`;
-  } else if (level === "below_3_8") {
+    message = `<!here> 🚨 The PSM USDC balance crossed below 20% of circulating USDS + DAI. ${sff} should be notified urgently that the PSM should be refilled.\n${details}`;
+  } else if (level === "below_25") {
     title = "⚠️ Important PSM balance threshold";
-    message = `<!here> The PSM balance crossed below 3.8B USDC. SFF should be notified for internal reaction.\n${details}`;
-  } else if (level === "below_3_7" || level === "below_3_6") {
-    const threshold = level === "below_3_7" ? "3.7B" : "3.6B";
-    title = "⚠️ Important PSM balance threshold";
-    message = `<!here> The PSM balance crossed below ${threshold} USDC. Restating the 3.8B alert: SFF should be notified for internal reaction.\n${details}`;
-  } else if (level === "below_3_9") {
-    title = "PSM balance below 3.9B";
-    message = `The PSM balance crossed below 3.9B USDC.\n${details}`;
+    message = `<!here> The PSM USDC balance crossed below 25% of circulating USDS + DAI. ${sff} should be notified for internal reaction.\n${details}`;
+  } else if (level === "below_28") {
+    title = "PSM reserve ratio below 28%";
+    message = `The PSM USDC balance crossed below 28% of circulating USDS + DAI.\n${details}`;
   } else {
-    title = "PSM balance below 4.0B";
-    message = `The PSM balance crossed below 4.0B USDC.\n${details}`;
+    title = "PSM reserve ratio below 30%";
+    message = `The PSM USDC balance crossed below 30% of circulating USDS + DAI.\n${details}`;
   }
 
   if (dropRaw > LARGE_DROP_RAW) {
@@ -114,9 +112,9 @@ export function slackDropMessage(snapshot: StatusSnapshot, previousBalanceUsdc: 
   };
 }
 
-export function slackInformationMessage(snapshot: StatusSnapshot): { text: string; blocks: unknown[] } {
+export function slackInformationMessage(snapshot: SlackAlertSnapshot): { text: string; blocks: unknown[] } {
   const title = "ℹ️ PSM balance update";
-  const message = `Current PSM USDC balance: *${displayBalance(snapshot.totalBalanceUsdc)}*.`;
+  const message = `Current PSM USDC balance: *${displayBalance(snapshot.totalBalanceUsdc)}* · *${coverage(snapshot)}* of circulating USDS + DAI (*${(Number(snapshot.circulatingSupply) / 1e9).toFixed(3)}B*).\nSupply checked: ${snapshot.supplyCheckedAt}`;
   return {
     text: `${title}\n${message.replace(/\*/g, "")}\nEthereum block: ${snapshot.blockNumber} · Checked ${snapshot.checkedAt}`,
     blocks: [
@@ -137,12 +135,15 @@ export class SlackAlerter {
     private readonly post: typeof fetch = fetch,
   ) {}
 
-  async check(snapshot: StatusSnapshot, now = Date.now()): Promise<void> {
+  async check(snapshot: SlackAlertSnapshot, now = Date.now()): Promise<void> {
     if (!this.config.webhookUrl) return;
+    if (this.config.sffMention && !/^(<@(?:U|W)[A-Z0-9]+>|<!subteam\^S[A-Z0-9]+>)$/.test(this.config.sffMention)) {
+      throw new Error("SLACK_SFF_MENTION must be a Slack user or user-group mention token");
+    }
+    const level = slackAlertLevel(snapshot.totalBalanceUsdc, snapshot.circulatingSupply);
     await this.loadState();
     const previous = this.state;
 
-    const level = slackAlertLevel(snapshot.totalBalanceUsdc);
     const recovery = level === "healthy" && previous !== undefined && previous.level !== "healthy";
     const crossedDown = level !== "healthy" && (
       previous === undefined || SEVERITY[level] > SEVERITY[previous.level]
@@ -159,12 +160,13 @@ export class SlackAlerter {
       level,
       lastCheckedAt: new Date(now).toISOString(),
       lastBalanceUsdc: snapshot.totalBalanceUsdc,
+      lastCirculatingSupply: snapshot.circulatingSupply,
       ...(lastInfoSentAt ? { lastInfoSentAt } : {}),
     });
 
     if (shouldSendThreshold || largeDrop) {
       const payload = shouldSendThreshold
-        ? slackMessage(snapshot, level, recovery, dropRaw)
+        ? slackMessage(snapshot, level, recovery, dropRaw, this.config.sffMention)
         : slackDropMessage(snapshot, previous!.lastBalanceUsdc, dropRaw);
       const response = await this.post(this.config.webhookUrl, {
         method: "POST",
@@ -198,9 +200,8 @@ export class SlackAlerter {
 
   private async loadState(): Promise<void> {
     if (this.loaded) return;
+    if (this.store) this.state = await this.store.loadSlackAlertState();
     this.loaded = true;
-    if (!this.store) return;
-    this.state = await this.store.loadSlackAlertState();
   }
 
   private async persistState(): Promise<void> {

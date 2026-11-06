@@ -9,6 +9,9 @@ import { Monitor } from "./monitor.js";
 import { HistoryMonitor } from "./history.js";
 import { Psm3Monitor } from "./psm3.js";
 import { SnapshotStore } from "./database.js";
+import { WithdrawalStore } from "./withdrawal-store.js";
+import { WithdrawalMonitor, withdrawalRanges, withdrawalResponse, type WithdrawalRange } from "./withdrawals.js";
+import { safeErrorMessage } from "./errors.js";
 
 const config = loadConfig();
 const client = makeClient(config);
@@ -17,6 +20,8 @@ const monitor = new Monitor(client, config);
 const history = new HistoryMonitor(client, config, store);
 const directExposure = new DirectExposureMonitor(store);
 const psm3 = new Psm3Monitor();
+const withdrawalStore = WithdrawalStore.fromEnvironment();
+const withdrawals = new WithdrawalMonitor(client, config, withdrawalStore);
 const soterLogo = readFileSync(new URL("../public/soter-labs.png", import.meta.url));
 const brandFont = readFileSync(new URL("../public/deltha.otf", import.meta.url));
 const favicon = readFileSync(new URL("../public/favicon.svg", import.meta.url));
@@ -171,6 +176,18 @@ const server = createServer(async (request, response) => {
       error: psm3.lastError ?? null,
     })}\n`);
   }
+  if (path === "/api/withdrawals") {
+    const requested = url.searchParams.get("range") ?? "7d";
+    if (!withdrawalRanges.includes(requested as WithdrawalRange)) {
+      return send(response, 400, "application/json; charset=utf-8", JSON.stringify({ error: { message: "Use 1d, 7d, 30d, 90d, or 180d" } }));
+    }
+    try {
+      const result = await withdrawalResponse(withdrawals, requested as WithdrawalRange);
+      return send(response, result.status, "application/json; charset=utf-8", JSON.stringify(result.body));
+    } catch (cause) {
+      return send(response, 503, "application/json; charset=utf-8", JSON.stringify({ snapshot: null, error: { message: safeErrorMessage(cause) } }));
+    }
+  }
   if (path === "/metrics") {
     await Promise.all([refreshReserve(), refreshPsm3(), refreshDirectExposure()]);
     return send(response, 200, "text/plain; version=0.0.4; charset=utf-8", metrics());
@@ -189,8 +206,7 @@ function shutdown(signal: string): void {
   directExposure.stop();
   psm3.stop();
   server.close(() => {
-    if (store) void store.close().finally(() => process.exit(0));
-    else process.exit(0);
+    void Promise.allSettled([store?.close(), withdrawalStore?.close()]).finally(() => process.exit(0));
   });
   setTimeout(() => process.exit(1), 10_000).unref();
 }

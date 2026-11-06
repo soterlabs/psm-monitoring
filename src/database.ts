@@ -17,7 +17,7 @@ type HistoryInterval = "daily" | "monthly";
 
 export class SnapshotStore implements SlackAlertStateStore {
   private readonly pool: Pool;
-  private initialized?: Promise<void>;
+  private initialized: Promise<void> | undefined;
 
   constructor(databaseUrl: string) {
     this.pool = new Pool({
@@ -34,7 +34,7 @@ export class SnapshotStore implements SlackAlertStateStore {
   }
 
   async initialize(): Promise<void> {
-    this.initialized ??= this.createSchema();
+    this.initialized ??= this.createSchema().catch(error => { this.initialized = undefined; throw error; });
     return this.initialized;
   }
 
@@ -152,29 +152,32 @@ export class SnapshotStore implements SlackAlertStateStore {
       level: SlackAlertLevel;
       last_checked_at: Date;
       last_balance_usdc: string;
-      last_info_sent_at: Date;
-    }>(`SELECT level, last_checked_at, last_balance_usdc::text, last_info_sent_at FROM slack_alert_state WHERE singleton = true`);
+      last_info_sent_at: Date | null;
+      last_circulating_supply: string | null;
+    }>(`SELECT level, last_checked_at, last_balance_usdc::text, last_info_sent_at, last_circulating_supply::text FROM slack_ratio_alert_state WHERE singleton = true`);
     const row = result.rows[0];
     if (!row) return undefined;
     return {
       level: row.level,
       lastCheckedAt: row.last_checked_at.toISOString(),
       lastBalanceUsdc: row.last_balance_usdc,
-      lastInfoSentAt: row.last_info_sent_at.toISOString(),
+      ...(row.last_info_sent_at ? { lastInfoSentAt: row.last_info_sent_at.toISOString() } : {}),
+      ...(row.last_circulating_supply ? { lastCirculatingSupply: row.last_circulating_supply } : {}),
     };
   }
 
   async saveSlackAlertState(state: SlackAlertState): Promise<void> {
     await this.initialize();
     await this.pool.query(
-      `INSERT INTO slack_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_info_sent_at)
-       VALUES (true, $1, $2::timestamptz, $3::numeric, $4::timestamptz)
+      `INSERT INTO slack_ratio_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_info_sent_at, last_circulating_supply)
+       VALUES (true, $1, $2::timestamptz, $3::numeric, $4::timestamptz, $5::numeric)
        ON CONFLICT (singleton) DO UPDATE SET
          level = EXCLUDED.level,
          last_checked_at = EXCLUDED.last_checked_at,
          last_balance_usdc = EXCLUDED.last_balance_usdc,
-         last_info_sent_at = EXCLUDED.last_info_sent_at`,
-      [state.level, state.lastCheckedAt, state.lastBalanceUsdc, state.lastInfoSentAt ?? null],
+         last_info_sent_at = EXCLUDED.last_info_sent_at,
+         last_circulating_supply = EXCLUDED.last_circulating_supply`,
+      [state.level, state.lastCheckedAt, state.lastBalanceUsdc, state.lastInfoSentAt ?? null, state.lastCirculatingSupply ?? null],
     );
   }
 
@@ -183,7 +186,11 @@ export class SnapshotStore implements SlackAlertStateStore {
   }
 
   private async createSchema(): Promise<void> {
-    await this.pool.query(`
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(20261106, 2)");
+      await client.query(`
       CREATE TABLE IF NOT EXISTS psm_balance_snapshots (
         sample_date date NOT NULL,
         interval text NOT NULL CHECK (interval IN ('daily', 'monthly')),
@@ -231,6 +238,23 @@ export class SnapshotStore implements SlackAlertStateStore {
         END IF;
       END;
       $migration$;
+
+      CREATE TABLE IF NOT EXISTS slack_ratio_alert_state (
+        singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+        level text NOT NULL CHECK (level IN ('healthy', 'below_30', 'below_28', 'below_25', 'below_20')),
+        last_checked_at timestamptz NOT NULL,
+        last_balance_usdc numeric(30, 6) NOT NULL,
+        last_info_sent_at timestamptz,
+        last_circulating_supply numeric(40, 18)
+      );
+      -- Preserve delivery history once without changing the old worker's table or bands.
+      INSERT INTO slack_ratio_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_info_sent_at)
+        SELECT singleton, 'healthy', last_checked_at, last_balance_usdc, last_info_sent_at
+        FROM slack_alert_state
+      ON CONFLICT (singleton) DO NOTHING;
     `);
+      await client.query("COMMIT");
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
   }
 }
