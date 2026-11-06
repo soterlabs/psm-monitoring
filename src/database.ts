@@ -17,7 +17,7 @@ type HistoryInterval = "daily" | "monthly";
 
 export class SnapshotStore implements SlackAlertStateStore {
   private readonly pool: Pool;
-  private initialized?: Promise<void>;
+  private initialized: Promise<void> | undefined;
 
   constructor(databaseUrl: string) {
     this.pool = new Pool({
@@ -34,7 +34,7 @@ export class SnapshotStore implements SlackAlertStateStore {
   }
 
   async initialize(): Promise<void> {
-    this.initialized ??= this.createSchema();
+    this.initialized ??= this.createSchema().catch(error => { this.initialized = undefined; throw error; });
     return this.initialized;
   }
 
@@ -153,7 +153,8 @@ export class SnapshotStore implements SlackAlertStateStore {
       last_checked_at: Date;
       last_balance_usdc: string;
       last_info_sent_at: Date;
-    }>(`SELECT level, last_checked_at, last_balance_usdc::text, last_info_sent_at FROM slack_alert_state WHERE singleton = true`);
+      last_circulating_supply: string | null;
+    }>(`SELECT level, last_checked_at, last_balance_usdc::text, last_info_sent_at, last_circulating_supply::text FROM slack_alert_state WHERE singleton = true`);
     const row = result.rows[0];
     if (!row) return undefined;
     return {
@@ -161,20 +162,22 @@ export class SnapshotStore implements SlackAlertStateStore {
       lastCheckedAt: row.last_checked_at.toISOString(),
       lastBalanceUsdc: row.last_balance_usdc,
       lastInfoSentAt: row.last_info_sent_at.toISOString(),
+      ...(row.last_circulating_supply ? { lastCirculatingSupply: row.last_circulating_supply } : {}),
     };
   }
 
   async saveSlackAlertState(state: SlackAlertState): Promise<void> {
     await this.initialize();
     await this.pool.query(
-      `INSERT INTO slack_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_info_sent_at)
-       VALUES (true, $1, $2::timestamptz, $3::numeric, $4::timestamptz)
+      `INSERT INTO slack_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_info_sent_at, last_circulating_supply)
+       VALUES (true, $1, $2::timestamptz, $3::numeric, $4::timestamptz, $5::numeric)
        ON CONFLICT (singleton) DO UPDATE SET
          level = EXCLUDED.level,
          last_checked_at = EXCLUDED.last_checked_at,
          last_balance_usdc = EXCLUDED.last_balance_usdc,
-         last_info_sent_at = EXCLUDED.last_info_sent_at`,
-      [state.level, state.lastCheckedAt, state.lastBalanceUsdc, state.lastInfoSentAt ?? null],
+         last_info_sent_at = EXCLUDED.last_info_sent_at,
+         last_circulating_supply = EXCLUDED.last_circulating_supply`,
+      [state.level, state.lastCheckedAt, state.lastBalanceUsdc, state.lastInfoSentAt ?? null, state.lastCirculatingSupply ?? null],
     );
   }
 
@@ -183,7 +186,11 @@ export class SnapshotStore implements SlackAlertStateStore {
   }
 
   private async createSchema(): Promise<void> {
-    await this.pool.query(`
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(20261106, 2)");
+      await client.query(`
       CREATE TABLE IF NOT EXISTS psm_balance_snapshots (
         sample_date date NOT NULL,
         interval text NOT NULL CHECK (interval IN ('daily', 'monthly')),
@@ -205,13 +212,15 @@ export class SnapshotStore implements SlackAlertStateStore {
       CREATE TABLE IF NOT EXISTS slack_alert_state (
         singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
         level text NOT NULL CONSTRAINT slack_alert_state_level_check
-          CHECK (level IN ('healthy', 'below_4_0', 'below_3_9', 'below_3_8', 'below_3_7', 'below_3_6', 'below_3_5')),
+          CHECK (level IN ('healthy', 'below_30', 'below_28', 'below_25', 'below_20')),
         last_checked_at timestamptz NOT NULL,
         last_balance_usdc numeric(30, 6) NOT NULL,
         last_info_sent_at timestamptz NOT NULL DEFAULT now()
       );
       ALTER TABLE slack_alert_state
         ADD COLUMN IF NOT EXISTS last_info_sent_at timestamptz NOT NULL DEFAULT now();
+      ALTER TABLE slack_alert_state
+        ADD COLUMN IF NOT EXISTS last_circulating_supply numeric(40, 18);
       DO $migration$
       BEGIN
         IF EXISTS (
@@ -219,18 +228,21 @@ export class SnapshotStore implements SlackAlertStateStore {
             FROM pg_constraint
            WHERE conrelid = 'slack_alert_state'::regclass
              AND conname = 'slack_alert_state_level_check'
-             AND position('below_4_0' IN pg_get_constraintdef(oid)) = 0
+             AND position('below_30' IN pg_get_constraintdef(oid)) = 0
         ) THEN
           ALTER TABLE slack_alert_state DROP CONSTRAINT slack_alert_state_level_check;
-          -- Start policy v2 from the healthy band so its first check reports any
+          -- Start ratio policy from the healthy band so its first check reports any
           -- already-active threshold instead of silently adopting it.
           UPDATE slack_alert_state SET level = 'healthy';
           ALTER TABLE slack_alert_state
             ADD CONSTRAINT slack_alert_state_level_check
-            CHECK (level IN ('healthy', 'below_4_0', 'below_3_9', 'below_3_8', 'below_3_7', 'below_3_6', 'below_3_5'));
+            CHECK (level IN ('healthy', 'below_30', 'below_28', 'below_25', 'below_20'));
         END IF;
       END;
       $migration$;
     `);
+      await client.query("COMMIT");
+    } catch (error) { await client.query("ROLLBACK"); throw error; }
+    finally { client.release(); }
   }
 }

@@ -12,6 +12,7 @@ export default defineRailway(() => {
       OPTIMISM_RPC: preserve(),
       UNICHAIN_RPC: preserve(),
       SLACK_WEBHOOK_URL: preserve(),
+      ENVIO_API_TOKEN: preserve(),
       DATABASE_URL: snapshots.env.DATABASE_URL,
     },
     healthcheck: "/healthz",
@@ -48,7 +49,21 @@ export default defineRailway(() => {
     },
   });
 
+  const withdrawals = fn("psm-withdrawals", {
+    source: github("soterlabs/psm-monitoring"),
+    env: {
+      ETH_RPC: psmMonitoring.env.ETH_RPC,
+      ENVIO_API_TOKEN: psmMonitoring.env.ENVIO_API_TOKEN,
+      DATABASE_URL: snapshots.env.DATABASE_URL,
+    },
+    start: "npm run withdrawals:sync",
+    deploy: {
+      cronSchedule: "*/10 * * * *",
+      restartPolicyType: "NEVER",
+    },
+  });
+
   return project("psm-monitoring", {
-    resources: [snapshots, psmMonitoring, dailySnapshots, slackAlerts],
+    resources: [snapshots, psmMonitoring, dailySnapshots, slackAlerts, withdrawals],
   });
 });
