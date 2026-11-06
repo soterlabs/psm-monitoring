@@ -55,4 +55,4 @@ The USDS PSM Wrapper does not route through the DaiUsds converter; it performs t
 
 ## What the dashboard means
 
-The displayed balance measures USDC reserve liquidity associated with this LitePSM. It does **not** represent the wrapper's token balance, total USDS supply, the LitePSM's DAI buffer, or Sky's on-chain debt ceiling. The configured 4B value is the monitor's minimum healthy target.
+The displayed balance measures USDC reserve liquidity associated with this LitePSM. It does **not** represent the wrapper's token balance, total USDS supply, the LitePSM's DAI buffer, or Sky's on-chain debt ceiling. The live minimum healthy target is 30% of circulating USDS + DAI, using the same supply definition as the Slack policy.

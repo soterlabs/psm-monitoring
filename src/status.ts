@@ -1,5 +1,20 @@
 import { formatUnits } from "viem";
 import type { BalanceReading, Level, StatusSnapshot } from "./types.js";
+import { reserveTargetRaw, reserveBand, reserveRatioPercent, RESERVE_TARGET_PERCENT, type CirculatingSupply, type ReserveBand } from "./supply.js";
+
+export interface LiquiditySnapshot extends StatusSnapshot, CirculatingSupply {
+  targetPercent: number;
+  reserveRatioPercent: number;
+  reserveBand: ReserveBand;
+}
+
+export function buildLiquiditySnapshot(reading: BalanceReading, supply: CirculatingSupply): LiquiditySnapshot {
+  const band = reserveBand(formatUnits(reading.totalBalanceRaw, 6), supply.circulatingSupply);
+  const status: Level = band === "healthy" ? "healthy" : band === "below_30" ? "warning" : band === "below_28" ? "critical" : "low";
+  const base = buildSnapshot(reading, reserveTargetRaw(supply.circulatingSupply), 28 / 30 * 100, 25 / 30 * 100);
+  return { ...base, ...supply, status, reserveBand: band, targetPercent: RESERVE_TARGET_PERCENT,
+    reserveRatioPercent: reserveRatioPercent(base.totalBalanceUsdc, supply.circulatingSupply) };
+}
 
 export function determineLevel(
   balance: bigint,

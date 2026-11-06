@@ -3,7 +3,7 @@ import { loadConfig } from "./config.js";
 import { SnapshotStore } from "./database.js";
 import { safeErrorMessage } from "./errors.js";
 import { SlackAlerter } from "./slack-alerts.js";
-import { buildSnapshot } from "./status.js";
+import { buildLiquiditySnapshot } from "./status.js";
 import { readCirculatingSupply } from "./supply.js";
 
 async function main(): Promise<void> {
@@ -14,7 +14,7 @@ async function main(): Promise<void> {
 
   try {
     const [reading, supply] = await Promise.all([readBalance(makeClient(config), config), readCirculatingSupply()]);
-    const snapshot = { ...buildSnapshot(reading, config.limitRaw, config.yellowPercent, config.orangePercent), ...supply };
+    const snapshot = buildLiquiditySnapshot(reading, supply);
     const alerter = new SlackAlerter({
       webhookUrl: config.slackWebhookUrl,
       ...(process.env.SLACK_SFF_MENTION ? { sffMention: process.env.SLACK_SFF_MENTION } : {}),

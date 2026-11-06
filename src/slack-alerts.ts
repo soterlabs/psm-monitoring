@@ -1,6 +1,6 @@
 import { formatUnits, parseUnits } from "viem";
 import type { StatusSnapshot } from "./types.js";
-import { supplyRaw, type CirculatingSupply } from "./supply.js";
+import { supplyRaw, reserveBand, type CirculatingSupply } from "./supply.js";
 
 export type SlackAlertSnapshot = StatusSnapshot & CirculatingSupply;
 
@@ -33,13 +33,7 @@ const SEVERITY: Record<SlackAlertLevel, number> = Object.fromEntries(
 ) as Record<SlackAlertLevel, number>;
 
 export function slackAlertLevel(balanceUsdc: string, circulatingSupply: string): SlackAlertLevel {
-  const balance = parseUnits(balanceUsdc, 6) * 10n ** 12n;
-  const supply = supplyRaw(circulatingSupply);
-  if (balance < 0n) throw new Error("PSM balance must not be negative");
-  for (const threshold of [20, 25, 28, 30] as const) {
-    if (balance * 100n < supply * BigInt(threshold)) return `below_${threshold}`;
-  }
-  return "healthy";
+  return reserveBand(balanceUsdc, circulatingSupply);
 }
 
 function coverage(snapshot: SlackAlertSnapshot): string {

@@ -1,6 +1,6 @@
 import { createServer, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
-import { getAddress } from "viem";
+import { getAddress, parseUnits } from "viem";
 import { loadConfig } from "./config.js";
 import { makeClient } from "./chain.js";
 import { dashboardHtml } from "./dashboard.js";
@@ -12,6 +12,7 @@ import { SnapshotStore } from "./database.js";
 import { WithdrawalStore } from "./withdrawal-store.js";
 import { WithdrawalMonitor, withdrawalRanges, withdrawalResponse, type WithdrawalRange } from "./withdrawals.js";
 import { safeErrorMessage } from "./errors.js";
+import { AddressLabels } from "./address-labels.js";
 
 const config = loadConfig();
 const client = makeClient(config);
@@ -22,6 +23,7 @@ const directExposure = new DirectExposureMonitor(store);
 const psm3 = new Psm3Monitor();
 const withdrawalStore = WithdrawalStore.fromEnvironment();
 const withdrawals = new WithdrawalMonitor(client, config, withdrawalStore);
+const addressLabels = new AddressLabels();
 const soterLogo = readFileSync(new URL("../public/soter-labs.png", import.meta.url));
 const brandFont = readFileSync(new URL("../public/deltha.otf", import.meta.url));
 const favicon = readFileSync(new URL("../public/favicon.svg", import.meta.url));
@@ -53,12 +55,18 @@ function metrics(): string {
       "# HELP psm_usdc_balance USDC held by the LitePSM and its pocket.",
       "# TYPE psm_usdc_balance gauge",
       `psm_usdc_balance ${snapshot.totalBalanceUsdc}`,
-      "# HELP psm_usdc_limit Configured USDC operational limit.",
+      "# HELP psm_usdc_limit Target USDC reserve at 30 percent of circulating USDS and DAI.",
       "# TYPE psm_usdc_limit gauge",
       `psm_usdc_limit ${snapshot.limitUsdc}`,
-      "# HELP psm_usdc_utilization_ratio Balance divided by configured limit.",
+      "# HELP psm_usdc_utilization_ratio Balance divided by the current 30 percent target.",
       "# TYPE psm_usdc_utilization_ratio gauge",
       `psm_usdc_utilization_ratio ${snapshot.utilizationPercent / 100}`,
+      "# HELP psm_circulating_supply Circulating USDS plus DAI used for the reserve target.",
+      "# TYPE psm_circulating_supply gauge",
+      `psm_circulating_supply ${snapshot.circulatingSupply}`,
+      "# HELP psm_reserve_supply_ratio USDC reserve divided by circulating USDS plus DAI.",
+      "# TYPE psm_reserve_supply_ratio gauge",
+      `psm_reserve_supply_ratio ${snapshot.reserveRatioPercent / 100}`,
       "# HELP psm_monitor_last_success_timestamp_seconds Unix time of the latest successful poll.",
       "# TYPE psm_monitor_last_success_timestamp_seconds gauge",
       `psm_monitor_last_success_timestamp_seconds ${Date.parse(snapshot.checkedAt) / 1_000}`,
@@ -152,10 +160,21 @@ const server = createServer(async (request, response) => {
     await refreshHistory();
     const requested = url.searchParams.get("range");
     const range = requested === "7d" || requested === "30d" || requested === "180d" || requested === "monthly" ? requested : "90d";
+    const storedSeries = history.series.get(range);
+    const current = monitor.snapshot;
+    const targetRaw = current ? parseUnits(current.limitUsdc, 6) : undefined;
+    // Historical balances remain unchanged. Their comparison line uses today's
+    // target explicitly, rather than presenting it as historical circulating supply.
+    const series = storedSeries && current && targetRaw ? {
+      ...storedSeries, limitUsdc: current.limitUsdc, targetPercent: current.targetPercent,
+      targetBasis: "latest_circulating_supply", supplyCheckedAt: current.supplyCheckedAt,
+      points: storedSeries.points.map(point => ({ ...point,
+        utilizationPercent: Number(parseUnits(point.balanceUsdc, 6) * 1_000_000n / targetRaw) / 10_000 })),
+    } : null;
     return send(response, 200, "application/json; charset=utf-8", `${JSON.stringify({
       loading: history.loading,
-      series: history.series.get(range) ?? null,
-      error: history.lastError ?? null,
+      series,
+      error: history.lastError ?? monitor.lastError ?? null,
     })}\n`);
   }
   if (path === "/api/direct-exposure") {
@@ -183,7 +202,11 @@ const server = createServer(async (request, response) => {
     }
     try {
       const result = await withdrawalResponse(withdrawals, requested as WithdrawalRange);
-      return send(response, result.status, "application/json; charset=utf-8", JSON.stringify(result.body));
+      void addressLabels.warm(result.body.snapshot.rows).catch(() => undefined);
+      return send(response, result.status, "application/json; charset=utf-8", JSON.stringify({ ...result.body,
+        labelsLoading: addressLabels.loading(result.body.snapshot.rows),
+        snapshot: { ...result.body.snapshot, rows: addressLabels.decorate(result.body.snapshot.rows) },
+      }));
     } catch (cause) {
       return send(response, 503, "application/json; charset=utf-8", JSON.stringify({ snapshot: null, error: { message: safeErrorMessage(cause) } }));
     }

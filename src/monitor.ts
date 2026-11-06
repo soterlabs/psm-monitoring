@@ -1,31 +1,28 @@
 import type { Config } from "./config.js";
 import { readBalance, type makeClient } from "./chain.js";
-import { buildSnapshot } from "./status.js";
+import { buildLiquiditySnapshot, type LiquiditySnapshot } from "./status.js";
+import { readCirculatingSupply } from "./supply.js";
 import type { Level, StatusSnapshot } from "./types.js";
 import { safeErrorMessage } from "./errors.js";
 
 type Client = ReturnType<typeof makeClient>;
 
 export class Monitor {
-  snapshot?: StatusSnapshot;
+  snapshot?: LiquiditySnapshot;
   lastError?: { message: string; at: string };
   private timer?: NodeJS.Timeout;
   private running = false;
   private lastAlert?: { level: Level; at: number };
 
-  constructor(private readonly client: Client, private readonly config: Config) {}
+  constructor(private readonly client: Client, private readonly config: Config,
+    private readonly loadSupply = readCirculatingSupply, private readonly loadBalance = readBalance) {}
 
   async poll(): Promise<void> {
     if (this.running) return;
     this.running = true;
     try {
-      const reading = await readBalance(this.client, this.config);
-      const next = buildSnapshot(
-        reading,
-        this.config.limitRaw,
-        this.config.yellowPercent,
-        this.config.orangePercent,
-      );
+      const [reading, supply] = await Promise.all([this.loadBalance(this.client, this.config), this.loadSupply()]);
+      const next = buildLiquiditySnapshot(reading, supply);
       this.snapshot = next;
       delete this.lastError;
       console.log(JSON.stringify({ event: "balance_checked", ...next }));
@@ -49,7 +46,7 @@ export class Monitor {
   }
 
   isFresh(now = Date.now()): boolean {
-    return Boolean(this.snapshot && now - Date.parse(this.snapshot.checkedAt) <= this.config.staleAfterMs);
+    return Boolean(this.snapshot && !this.lastError && now - Date.parse(this.snapshot.checkedAt) <= this.config.staleAfterMs);
   }
 
   /** Retains the pre-existing generic webhook integration independently of Slack policy alerts. */
