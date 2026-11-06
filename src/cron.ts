@@ -5,6 +5,7 @@ import { SnapshotStore } from "./database.js";
 import { loadDirectExposurePoints } from "./direct-exposure.js";
 import { safeErrorMessage } from "./errors.js";
 import { HistoryMonitor } from "./history.js";
+import { readDailyTargets, type DailyTarget } from "./target-history.js";
 
 async function run(): Promise<void> {
   const store = SnapshotStore.fromEnvironment();
@@ -12,6 +13,16 @@ async function run(): Promise<void> {
 
   try {
     await store.initialize();
+    // Save daily supply independently of the longer archive/exposure reconstruction.
+    let targets: DailyTarget[] = [];
+    let targetError: unknown;
+    try {
+      targets = await readDailyTargets();
+      await store.saveDailyTargets(targets);
+    } catch (error) {
+      targetError = error;
+      console.error(JSON.stringify({ event: "daily_targets_failed", message: safeErrorMessage(error) }));
+    }
     const config = loadConfig();
     const client = makeClient(config);
     const reading = await readBalance(client, config);
@@ -33,10 +44,12 @@ async function run(): Promise<void> {
       event: "daily_snapshots_saved",
       at: new Date().toISOString(),
       psmDailyPoints: daily.length,
+      dailyTargetPoints: targets.length,
       psmMonthlyPoints: monthly.length - 1,
       directExposurePoints: exposure.length,
       directExposureAsOf: exposure.at(-1)?.date,
     }));
+    if (targetError) throw targetError;
   } finally {
     await store.close();
   }

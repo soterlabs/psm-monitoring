@@ -29,7 +29,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for a concise explanation of the pocket, 
 
 - `/` — live dashboard, refreshed every 30 seconds
 - `/api/status` — machine-readable status and most recent RPC error
-- `/api/history?range=30d` — daily history (`7d`, `90d`, `180d`, and `monthly` are also available)
+- `/api/history?range=30d` — balance history with a per-point `targetUsdc` and an independent daily `targetPoints` curve (`7d`, `90d`, `180d`, and `monthly` are also available); unavailable targets and utilization are `null`
 - `/direct-exposure` — compatibility URL for the consolidated dashboard
 - `/api/direct-exposure?range=30d` — per-venue history (`7d`, `90d`, `ytd`, `all`, and `monthly` are also available)
 - `/api/psm3` — live PSM3 USDC reserves and Spark ownership by L2
@@ -64,7 +64,7 @@ The repository includes a production `Dockerfile` and Railway infrastructure-as-
 
 For withdrawal rankings, also set `ENVIO_API_TOKEN` on the web service. Optional `ETHERSCAN_API_KEY` belongs only on the web service for server-side contract-name enrichment. The infrastructure declaration adds `psm-withdrawals`, a ten-minute cron running `npm run withdrawals:sync`, with references to the same RPC, token and database. On first deployment the worker backfills 180 days; subsequent runs catch up to the latest finalized block. Covered rankings return immediately while indexing refreshes in the background. Initial requests wait at most eight seconds before returning a loading response; later requests resume the same in-flight work. Provider throttling retries briefly; if it persists, the next request or cron resumes at the last committed cursor. To seed manually, build the project and run `npm run withdrawals:sync` with those three variables available. No production database credentials or indexer tokens belong in source control.
 
-Slack policy uses the PSM USDC reserve divided by **circulating USDS + DAI**, fetched for each check from [BA Labs' Sky supply API](https://sky.data.blockanalitica.com/internal/supply/). This differs from raw USDS issuance and sUSDS vault TVL. The same denominator determines the dashboard’s 30% target and headline ratios. The history chart compares past USDC balances against the current target, explicitly labeled as a current reference rather than a reconstruction of historical circulating supply. Invalid or unavailable supply stops that alert check without advancing its state; no cached denominator is substituted.
+Slack policy uses the PSM USDC reserve divided by **circulating USDS + DAI**, fetched for each check from [BA Labs' Sky supply API](https://sky.data.blockanalitica.com/internal/supply/). This differs from raw USDS issuance and sUSDS vault TVL. The same denominator determines the dashboard’s 30% target and headline ratios. Historical targets are **4B USDC through November 3, 2026 (UTC)**, then **30% of each date’s circulating USDS + DAI from November 4**. The dated [supply history](https://sky.data.blockanalitica.com/internal/supply/historic/) supplies each daily value; today’s supply is never used to reconstruct earlier dates. `psm_daily_targets` persists the combined circulating supply, exact target rounded up to micro-USDC, source URL, fetch time, and provisional flag by UTC date. The daily worker backfills and refreshes this table before reconstructing balances; dashboard history requests also refresh it at most every 15 minutes. The provider’s current-date row is provisional; later dated history can finalize it or correct the same date. Historical values are daily provider snapshots, not supply at the exact Ethereum block of the balance sample. Missing daily supply leaves an explicit gap in the target line. Saved targets remain available during provider outages. Live headline cards and alerts continue to use the latest supply reading. Invalid or unavailable supply stops that alert check without advancing its state; no cached denominator is substituted.
 
 Optional Slack alerting uses an Incoming Webhook:
 
@@ -94,7 +94,7 @@ The dedicated `slack-psm-alerts` Railway cron evaluates the reserve ratio every 
 | `ALERT_WEBHOOK_URL` | no | — | Legacy generic webhook; do not point it at the same Slack channel |
 | `ALERT_REMINDER_SECONDS` | no | `3600` | Legacy generic-webhook reminder interval |
 | `SETTLEMENT_API_URL` | no | public settle API | Override the SDE daily-data service |
-| `SKY_DATA_API_URL` | no | BA Labs public Sky Data API | Override Basin JTRSY history and the circulating-supply API for alerts |
+| `SKY_DATA_API_URL` | no | BA Labs public Sky Data API | Override Basin JTRSY history and current/historical circulating-supply APIs |
 | `BASE_RPC` | yes for PSM3 verification | — | Base JSON-RPC URL |
 | `ARBITRUM_RPC` | yes for PSM3 verification | — | Arbitrum JSON-RPC URL |
 | `OPTIMISM_RPC` | yes for PSM3 verification | — | Optimism JSON-RPC URL |
