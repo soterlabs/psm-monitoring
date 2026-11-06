@@ -200,9 +200,8 @@ export class SlackAlerter {
 
   private async loadState(): Promise<void> {
     if (this.loaded) return;
+    if (this.store) this.state = await this.store.loadSlackAlertState();
     this.loaded = true;
-    if (!this.store) return;
-    this.state = await this.store.loadSlackAlertState();
   }
 
   private async persistState(): Promise<void> {

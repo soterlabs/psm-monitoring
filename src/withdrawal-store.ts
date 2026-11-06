@@ -5,7 +5,8 @@ export class WithdrawalStore implements WithdrawalStorage {
   private readonly pool: Pool;
   private initialized: Promise<void> | undefined;
   constructor(databaseUrl: string) {
-    this.pool = new Pool({ connectionString: databaseUrl, max: 2, idleTimeoutMillis: 10_000, allowExitOnIdle: true });
+    this.pool = new Pool({ connectionString: databaseUrl, max: 2, connectionTimeoutMillis: 5_000, statement_timeout: 15_000,
+      idleTimeoutMillis: 10_000, allowExitOnIdle: true });
   }
   static fromEnvironment(): WithdrawalStore | undefined {
     return process.env.DATABASE_URL ? new WithdrawalStore(process.env.DATABASE_URL) : undefined;

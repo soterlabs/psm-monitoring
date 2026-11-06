@@ -72,6 +72,22 @@ describe("slackAlertLevel", () => {
 });
 
 describe("SlackAlerter", () => {
+  it("reloads persisted state after a transient load failure rather than repeating an alert", async () => {
+    let loads = 0, posts = 0;
+    const store: SlackAlertStateStore = {
+      async loadSlackAlertState() {
+        if (++loads === 1) throw new Error("database temporarily unavailable");
+        return { level: "below_25", lastCheckedAt: "2026-09-23T12:00:00Z", lastBalanceUsdc: "2450000000", lastInfoSentAt: "2026-09-23T12:00:00Z" };
+      },
+      async saveSlackAlertState() {},
+    };
+    const post = (async () => { posts++; return new Response("ok"); }) as typeof fetch;
+    const alerter = new SlackAlerter({ webhookUrl: "https://example.com/slack" }, store, post);
+    const now = Date.parse("2026-09-23T12:10:00Z");
+    await assert.rejects(alerter.check(snapshot("2450000000"), now), /temporarily unavailable/);
+    await alerter.check(snapshot("2450000000"), now);
+    assert.equal(loads, 2); assert.equal(posts, 0);
+  });
   it("reacts to supply growth with unchanged USDC and persists the ratio band", async () => {
     const store = new MemoryStore(), payloads: { text: string }[] = [];
     const post = (async (_url, init) => { payloads.push(JSON.parse(String(init?.body))); return new Response("ok"); }) as typeof fetch;
