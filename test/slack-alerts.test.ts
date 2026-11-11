@@ -41,6 +41,33 @@ class MemoryStore implements SlackAlertStateStore {
 }
 
 describe("slackAlertLevel", () => {
+  it("includes the current reserve ratio in every Slack message and fallback text", () => {
+    const current = { ...snapshot("2600000000"), circulatingSupply: "8700000000" };
+    const messages = [
+      ...(["below_30", "below_28", "below_25", "below_20"] as const).map(level => slackMessage(current, level)),
+      slackMessage(current, "healthy", true),
+      slackDropMessage(current, "2650000000", 50_000_000_000_000n),
+      slackInformationMessage(current),
+    ];
+    for (const message of messages) {
+      assert.match(message.text, /Current reserve ratio: 29\.89% of circulating USDS \+ DAI \(8\.700B\)/);
+      assert.match(JSON.stringify(message.blocks), /Current reserve ratio: \*29\.89%\*/);
+    }
+    assert.match(slackMessage(snapshot("2999999999"), "below_30").text, /29\.999999%/);
+  });
+  it("rounds half-hundredths exactly and preserves precision below every alert threshold", () => {
+    assert.match(slackInformationMessage(snapshot("2614500000")).text, /Current reserve ratio: 26\.15%/);
+    for (const [balance, ratio] of [
+      ["1999500000", "19.995"], ["2499500000", "24.995"],
+      ["2799500000", "27.995"], ["2999500000", "29.995"],
+    ]) {
+      assert.ok(slackInformationMessage(snapshot(balance!)).text.includes(`Current reserve ratio: ${ratio}%`));
+    }
+    const lower = slackInformationMessage({ ...snapshot("2614500000"), circulatingSupply: "10000000000.000000000001" });
+    assert.match(lower.text, /Current reserve ratio: 26\.14%/);
+    const higher = slackInformationMessage({ ...snapshot("2614500000"), circulatingSupply: "9999999999.999999999999" });
+    assert.match(higher.text, /Current reserve ratio: 26\.15%/);
+  });
   it("uses exact relative boundaries without floating-point comparisons", () => {
     for (const [balance, expected] of [
       ["3000000000", "healthy"], ["2999999999.999999", "below_30"],
