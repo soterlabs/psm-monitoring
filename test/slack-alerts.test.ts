@@ -41,6 +41,20 @@ class MemoryStore implements SlackAlertStateStore {
 }
 
 describe("slackAlertLevel", () => {
+  it("includes the current reserve ratio in every Slack message and fallback text", () => {
+    const current = { ...snapshot("2600000000"), circulatingSupply: "8700000000" };
+    const messages = [
+      ...(["below_30", "below_28", "below_25", "below_20"] as const).map(level => slackMessage(current, level)),
+      slackMessage(current, "healthy", true),
+      slackDropMessage(current, "2650000000", 50_000_000_000_000n),
+      slackInformationMessage(current),
+    ];
+    for (const message of messages) {
+      assert.match(message.text, /Current reserve ratio: 29\.89% of circulating USDS \+ DAI \(8\.700B\)/);
+      assert.match(JSON.stringify(message.blocks), /Current reserve ratio: \*29\.89%\*/);
+    }
+    assert.match(slackMessage(snapshot("2999999999"), "below_30").text, /29\.999999%/);
+  });
   it("uses exact relative boundaries without floating-point comparisons", () => {
     for (const [balance, expected] of [
       ["3000000000", "healthy"], ["2999999999.999999", "below_30"],

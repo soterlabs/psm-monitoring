@@ -37,7 +37,15 @@ export function slackAlertLevel(balanceUsdc: string, circulatingSupply: string):
 }
 
 function coverage(snapshot: SlackAlertSnapshot): string {
-  return `${formatUnits(parseUnits(snapshot.totalBalanceUsdc, 6) * 10n ** 12n * 100_000_000n / supplyRaw(snapshot.circulatingSupply), 6)}%`;
+  const exact = formatUnits(parseUnits(snapshot.totalBalanceUsdc, 6) * 10n ** 12n * 100_000_000n / supplyRaw(snapshot.circulatingSupply), 6);
+  const rounded = Number(exact).toFixed(2);
+  // Avoid a below-threshold alert displaying a rounded ratio at the threshold.
+  const crossesBoundary = [20, 25, 28, 30].some(value => Number(exact) < value && Number(rounded) >= value);
+  return `${crossesBoundary ? exact : rounded}%`;
+}
+
+function reserveRatioLine(snapshot: SlackAlertSnapshot): string {
+  return `Current reserve ratio: *${coverage(snapshot)}* of circulating USDS + DAI (*${(Number(snapshot.circulatingSupply) / 1e9).toFixed(3)}B*).`;
 }
 
 function displayBalance(balanceUsdc: string): string {
@@ -56,7 +64,7 @@ export function slackMessage(
   sffMention?: string,
 ): { text: string; blocks: unknown[] } {
   const balance = displayBalance(snapshot.totalBalanceUsdc);
-  const details = `Reserve ratio: *${coverage(snapshot)}* of circulating USDS + DAI.\nBalance: *${balance}* · Circulating supply: *${(Number(snapshot.circulatingSupply) / 1e9).toFixed(3)}B* · Ethereum block: \`${snapshot.blockNumber}\`\nSupply checked: ${snapshot.supplyCheckedAt}`;
+  const details = `${reserveRatioLine(snapshot)}\nBalance: *${balance}* · Ethereum block: \`${snapshot.blockNumber}\`\nSupply checked: ${snapshot.supplyCheckedAt}`;
   const sff = sffMention ? `${sffMention} (SFF)` : "SFF";
   let title: string;
   let message: string;
@@ -93,9 +101,9 @@ export function slackMessage(
   };
 }
 
-export function slackDropMessage(snapshot: StatusSnapshot, previousBalanceUsdc: string, dropRaw: bigint): { text: string; blocks: unknown[] } {
+export function slackDropMessage(snapshot: SlackAlertSnapshot, previousBalanceUsdc: string, dropRaw: bigint): { text: string; blocks: unknown[] } {
   const title = "PSM balance movement";
-  const message = `The PSM balance decreased by *${displayDrop(dropRaw)}* between two consecutive 10-minute checks.\nPrevious: *${displayBalance(previousBalanceUsdc)}* · Current: *${displayBalance(snapshot.totalBalanceUsdc)}*\nThis is an informational note; no team mention was sent.`;
+  const message = `The PSM balance decreased by *${displayDrop(dropRaw)}* between two consecutive 10-minute checks.\nPrevious: *${displayBalance(previousBalanceUsdc)}* · Current: *${displayBalance(snapshot.totalBalanceUsdc)}*\n${reserveRatioLine(snapshot)}\nSupply checked: ${snapshot.supplyCheckedAt}\nThis is an informational note; no team mention was sent.`;
   return {
     text: `${title}\n${message.replace(/\*/g, "")}`,
     blocks: [
@@ -108,7 +116,7 @@ export function slackDropMessage(snapshot: StatusSnapshot, previousBalanceUsdc: 
 
 export function slackInformationMessage(snapshot: SlackAlertSnapshot): { text: string; blocks: unknown[] } {
   const title = "ℹ️ PSM balance update";
-  const message = `Current PSM USDC balance: *${displayBalance(snapshot.totalBalanceUsdc)}* · *${coverage(snapshot)}* of circulating USDS + DAI (*${(Number(snapshot.circulatingSupply) / 1e9).toFixed(3)}B*).\nSupply checked: ${snapshot.supplyCheckedAt}`;
+  const message = `Current PSM USDC balance: *${displayBalance(snapshot.totalBalanceUsdc)}*\n${reserveRatioLine(snapshot)}\nSupply checked: ${snapshot.supplyCheckedAt}`;
   return {
     text: `${title}\n${message.replace(/\*/g, "")}\nEthereum block: ${snapshot.blockNumber} · Checked ${snapshot.checkedAt}`,
     blocks: [
