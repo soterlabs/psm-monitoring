@@ -55,6 +55,19 @@ describe("slackAlertLevel", () => {
     }
     assert.match(slackMessage(snapshot("2999999999"), "below_30").text, /29\.999999%/);
   });
+  it("rounds half-hundredths exactly and preserves precision below every alert threshold", () => {
+    assert.match(slackInformationMessage(snapshot("2614500000")).text, /Current reserve ratio: 26\.15%/);
+    for (const [balance, ratio] of [
+      ["1999500000", "19.995"], ["2499500000", "24.995"],
+      ["2799500000", "27.995"], ["2999500000", "29.995"],
+    ]) {
+      assert.ok(slackInformationMessage(snapshot(balance!)).text.includes(`Current reserve ratio: ${ratio}%`));
+    }
+    const lower = slackInformationMessage({ ...snapshot("2614500000"), circulatingSupply: "10000000000.000000000001" });
+    assert.match(lower.text, /Current reserve ratio: 26\.14%/);
+    const higher = slackInformationMessage({ ...snapshot("2614500000"), circulatingSupply: "9999999999.999999999999" });
+    assert.match(higher.text, /Current reserve ratio: 26\.15%/);
+  });
   it("uses exact relative boundaries without floating-point comparisons", () => {
     for (const [balance, expected] of [
       ["3000000000", "healthy"], ["2999999999.999999", "below_30"],

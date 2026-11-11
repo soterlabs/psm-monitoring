@@ -37,11 +37,15 @@ export function slackAlertLevel(balanceUsdc: string, circulatingSupply: string):
 }
 
 function coverage(snapshot: SlackAlertSnapshot): string {
-  const exact = formatUnits(parseUnits(snapshot.totalBalanceUsdc, 6) * 10n ** 12n * 100_000_000n / supplyRaw(snapshot.circulatingSupply), 6);
-  const rounded = Number(exact).toFixed(2);
+  const numerator = parseUnits(snapshot.totalBalanceUsdc, 6) * 10n ** 12n * 100n;
+  const denominator = supplyRaw(snapshot.circulatingSupply);
+  // Round directly from the token amounts to avoid binary floating-point errors
+  // at half-hundredths.
+  const hundredths = (numerator * 100n + denominator / 2n) / denominator;
+  const rounded = `${hundredths / 100n}.${(hundredths % 100n).toString().padStart(2, "0")}`;
   // Avoid a below-threshold alert displaying a rounded ratio at the threshold.
-  const crossesBoundary = [20, 25, 28, 30].some(value => Number(exact) < value && Number(rounded) >= value);
-  return `${crossesBoundary ? exact : rounded}%`;
+  const crossesBoundary = [20n, 25n, 28n, 30n].some(value => numerator < denominator * value && hundredths >= value * 100n);
+  return `${crossesBoundary ? formatUnits(numerator * 1_000_000n / denominator, 6) : rounded}%`;
 }
 
 function reserveRatioLine(snapshot: SlackAlertSnapshot): string {
