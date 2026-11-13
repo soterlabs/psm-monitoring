@@ -14,6 +14,7 @@ export default defineRailway(() => {
       SLACK_WEBHOOK_URL: preserve(),
       ENVIO_API_TOKEN: preserve(),
       ETHERSCAN_API_KEY: preserve(),
+      ARKM_API_KEY: preserve(),
       DATABASE_URL: snapshots.env.DATABASE_URL,
     },
     healthcheck: "/healthz",

@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import type { DailyTarget } from "./target-history.js";
+import type { AddressLabelStore, CachedLabel } from "./address-labels.js";
 import type { DirectExposurePoint, HistoryPoint } from "./types.js";
 import type { SlackAlertLevel, SlackAlertState, SlackAlertStateStore } from "./slack-alerts.js";
 
@@ -16,7 +17,7 @@ export interface StoredExposure {
 
 type HistoryInterval = "daily" | "monthly";
 
-export class SnapshotStore implements SlackAlertStateStore {
+export class SnapshotStore implements SlackAlertStateStore, AddressLabelStore {
   private readonly pool: Pool;
   private initialized: Promise<void> | undefined;
 
@@ -24,6 +25,8 @@ export class SnapshotStore implements SlackAlertStateStore {
     this.pool = new Pool({
       connectionString: databaseUrl,
       max: 3,
+      connectionTimeoutMillis: 5_000,
+      statement_timeout: 15_000,
       idleTimeoutMillis: 10_000,
       allowExitOnIdle: true,
     });
@@ -65,6 +68,22 @@ export class SnapshotStore implements SlackAlertStateStore {
     } finally {
       client.release();
     }
+  }
+
+  async loadAddressLabels(provider: string): Promise<{ address: string; value: CachedLabel }[]> {
+    await this.initialize();
+    const result = await this.pool.query<{ address: string; label: string | null; source: string | null; expires_at: Date }>(
+      "SELECT address, label, source, expires_at FROM psm_address_labels WHERE provider = $1 AND (expires_at > now() OR label IS NOT NULL)", [provider]);
+    return result.rows.map(row => ({ address: row.address, value: { label: row.label, source: row.source, expiresAt: row.expires_at.getTime() } }));
+  }
+
+  async saveAddressLabel(provider: string, address: string, value: CachedLabel): Promise<void> {
+    await this.initialize();
+    await this.pool.query(`INSERT INTO psm_address_labels (provider, address, label, source, expires_at)
+      VALUES ($1, $2, $3, $4, $5::timestamptz)
+      ON CONFLICT (provider, address) DO UPDATE SET label = EXCLUDED.label, source = EXCLUDED.source, expires_at = EXCLUDED.expires_at
+      WHERE EXCLUDED.expires_at >= psm_address_labels.expires_at`,
+      [provider, address.toLowerCase(), value.label, value.source, new Date(value.expiresAt).toISOString()]);
   }
 
   async saveDailyTargets(points: DailyTarget[]): Promise<void> {
@@ -230,6 +249,14 @@ export class SnapshotStore implements SlackAlertStateStore {
         utilization_percent double precision NOT NULL,
         updated_at timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY (sample_date, interval)
+      );
+      CREATE TABLE IF NOT EXISTS psm_address_labels (
+        provider text NOT NULL,
+        address text NOT NULL,
+        label text,
+        source text,
+        expires_at timestamptz NOT NULL,
+        PRIMARY KEY (provider, address)
       );
       CREATE INDEX IF NOT EXISTS psm_balance_snapshots_observed_at_idx
         ON psm_balance_snapshots (observed_at DESC);
