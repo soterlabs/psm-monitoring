@@ -33,3 +33,14 @@ it("draws round labels using the embedded dashboard script at mobile and desktop
     assert.deepEqual(labels.filter(label => label.endsWith("B")), ["2.5B", "2.6B", "2.7B"]);
   }
 });
+
+it("uses dated policy colors and preserves the legacy chart colors", () => {
+  const start = dashboardHtml.indexOf("const colorFor="), end = dashboardHtml.indexOf(",health=",start);
+  const color = runInNewContext(dashboardHtml.slice(start,end)+";colorFor", {chartColor:(v:string)=>v});
+  assert.equal(color(94,30),"--yellow");
+  assert.equal(color(94,null),"--yellow");
+  assert.equal(color(94,25),"--orange");
+  assert.equal(color(96,25),"--yellow");
+  assert.equal(color(88,25),"--orange");
+  assert.equal(color(87.99,25),"--red");
+});

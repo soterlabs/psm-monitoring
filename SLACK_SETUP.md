@@ -36,7 +36,6 @@ The numerator is canonical USDC held by the LitePSM pocket plus USDC held direct
 | `< 24%` and `≥ 22%` | Downward-crossing message; no mention |
 | `< 22%` and `≥ 20%` | Important threshold; `@here`; SFF internal-reaction callout |
 | `< 20%` and `≥ 18%` | 🚨 **ACTION NEEDED**; `@here`; urgent SFF refill callout |
-
 | `< 18%` | Stronger alarm; `@here`; urgent SFF refill callout |
 
 Comparisons use full token precision, with strict below-threshold boundaries and no floating-point decisions. Ratios can cross thresholds because reserves decrease or circulating supply increases. Only the deepest band observed in a check is sent. The cron checks every ten minutes and sends an untagged balance/ratio update every twelve hours. Lower-band messages are not repeated merely because time elapsed; partial recoveries update the observed band quietly, and a later downward recrossing sends again. Recovery to at least 25% sends one untagged message.

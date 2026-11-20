@@ -89,6 +89,11 @@ describe("slackAlertLevel", () => {
       assert.match(text, /<!here>/);
       assert.match(text, /SFF should be notified for internal reaction/);
     }
+    const deepest = slackMessage(snapshot("1790000000"), "below_18", false, 0n, "<!subteam^S123>").text;
+    assert.match(deepest, /🚨🚨 ACTION NEEDED — PSM below 18%/);
+    assert.match(deepest, /<!here>/);
+    assert.match(deepest, /<!subteam\^S123>/);
+    assert.match(deepest, /notified urgently/);
     const critical = slackMessage(snapshot("1990000000"), "below_20").text;
     assert.match(critical, /<!here>/);
     assert.match(critical, /🚨 ACTION NEEDED/);
