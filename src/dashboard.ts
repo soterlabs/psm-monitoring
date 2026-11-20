@@ -90,7 +90,7 @@ async function loadWithdrawals(range){
    tr.append(rank,address,label,amount);body.append(tr);
   });
   if(!snapshot.rows.length)message('No net USDC withdrawers in this period.');
-  note.textContent='Rolling '+(range==='24h'?'1':range.slice(0,-1))+'-day period · '+new Date(snapshot.from).toLocaleString()+' – '+new Date(snapshot.asOf).toLocaleString()+' · finalized Ethereum blocks'+(data.sampledAt?' · Snapshot '+new Date(data.sampledAt).toLocaleString():'');
+  note.textContent=(range==='24h'?'Last 24h':'Rolling '+range.slice(0,-1)+'-day period')+' · '+new Date(snapshot.from).toLocaleString()+' – '+new Date(snapshot.asOf).toLocaleString()+' · finalized Ethereum blocks'+(data.sampledAt?' · Snapshot '+new Date(data.sampledAt).toLocaleString():'');
   if(data.error){error.style.display='block';error.textContent=data.error.code==='rate_limited'?'Provider rate limit: showing saved rankings. Next update attempt after '+new Date(data.retryAt).toLocaleString()+'.':'Latest refresh issue: '+data.error.message}
   withdrawalTimer=setTimeout(()=>loadWithdrawals(range),data.labelsLoading?5000:data.retryAt?retryDelay:(range==='24h'||range==='7d')?600000:86400000);
  }catch(e){
@@ -132,7 +132,7 @@ async function loadDeposits(range){
    tr.append(rank,address,label,amount);body.append(tr);
   });
   if(!snapshot.rows.length)message('No net USDC depositors in this period.');
-  note.textContent='Rolling '+(range==='24h'?'1':range.slice(0,-1))+'-day period · '+new Date(snapshot.from).toLocaleString()+' – '+new Date(snapshot.asOf).toLocaleString()+' · finalized Ethereum blocks'+(data.sampledAt?' · Snapshot '+new Date(data.sampledAt).toLocaleString():'');
+  note.textContent=(range==='24h'?'Last 24h':'Rolling '+range.slice(0,-1)+'-day period')+' · '+new Date(snapshot.from).toLocaleString()+' – '+new Date(snapshot.asOf).toLocaleString()+' · finalized Ethereum blocks'+(data.sampledAt?' · Snapshot '+new Date(data.sampledAt).toLocaleString():'');
   if(data.error){error.style.display='block';error.textContent=data.error.code==='rate_limited'?'Provider rate limit: showing saved rankings. Next update attempt after '+new Date(data.retryAt).toLocaleString()+'.':'Latest refresh issue: '+data.error.message}
   depositorTimer=setTimeout(()=>loadDeposits(range),data.labelsLoading?5000:data.retryAt?retryDelay:(range==='24h'||range==='7d')?600000:86400000);
  }catch(e){
