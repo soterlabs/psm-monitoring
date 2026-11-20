@@ -115,3 +115,7 @@ Reserve history offers “Last 24h - 10min updates” and “7 days - 10min upda
 The ten-minute Slack cron records reserve/supply/target observations before alert delivery, independently of indexer catch-up. The net-withdrawer and net-depositor cards query current indexed rolling windows, with ten-minute refreshes for the short periods and daily refreshes for longer periods. “Last 24h” replaces the duplicate “1 day” option; `range=1d` remains an API compatibility alias for `range=24h`. Both are the same rolling indexed window, not separate cached leaderboards.
 
 The third section ranks positive replenishments minus withdrawals using the same wrapper-funding attribution, labels, full Etherscan links and rounding as net withdrawers. `/api/depositors?range=7d` serves this ranking. `/api/history?range=24h` and `range=7d` serve reserve observations at ten-minute resolution. Missed observations remain gaps rather than interpolated balances.
+
+### Default dashboard period
+
+Set `DASHBOARD_DEFAULT_PERIOD` on the Railway **psm-monitoring** web service to `24h`, `7d`, `30d`, `90d`, or `180d`, then redeploy to apply it. Unset defaults to `24h`; invalid values fail startup with a configuration error. All four card selectors and their initial requests use the same setting. Refill capacity’s Last 24h view shows the latest available daily estimate and its actual as-of date, without synthesizing ten-minute settlement data.
