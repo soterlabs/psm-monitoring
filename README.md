@@ -107,3 +107,9 @@ Secrets are runtime configuration only. `.env` files are ignored by git.
 ## License
 
 MIT
+
+### Ten-minute history and net depositors
+
+“Last 24 hours · 10-minute updates” uses forward-collected Postgres snapshots (`psm_intraday_snapshots`), with no historical backfill. The existing ten-minute Slack cron records reserve balance, circulating supply/target, and rolling-24-hour withdrawal/depositor rankings before sending alerts. Collection runs independently of withdrawal-index catch-up and survives Slack delivery failures. Reserve history plots only collected observations; missed observations leave balance-line gaps. Until the first sample, the cards show a collection-in-progress message. Ranking snapshots retain their finalized index as-of timestamp and the sampling timestamp.
+
+The third section, “Top net USDC depositors,” ranks replenishments minus withdrawals in descending order, excluding neutral accounts and net withdrawers. It uses the same wrapper-funding attribution, labels, full Etherscan links, periods and rounding as net withdrawers. `/api/depositors?range=7d` serves this ranking; both flow APIs accept `range=24h` for the latest ten-minute snapshot. `/api/history?range=24h` serves the recorded reserve/target observations over the preceding 24 hours. Existing `1d` flow rankings continue to use the current indexed rolling window.

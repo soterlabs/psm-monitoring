@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import type { IntradaySnapshot } from "./intraday.js";
 import type { DailyTarget } from "./target-history.js";
 import type { AddressLabelStore, CachedLabel } from "./address-labels.js";
 import type { DirectExposurePoint, HistoryPoint } from "./types.js";
@@ -40,6 +41,22 @@ export class SnapshotStore implements SlackAlertStateStore, AddressLabelStore {
   async initialize(): Promise<void> {
     this.initialized ??= this.createSchema().catch(error => { this.initialized = undefined; throw error; });
     return this.initialized;
+  }
+
+  async saveIntraday(sample: IntradaySnapshot): Promise<void> {
+    await this.initialize();
+    const bucket = new Date(Math.floor(Date.parse(sample.observedAt) / 600_000) * 600_000).toISOString();
+    await this.pool.query(`INSERT INTO psm_intraday_snapshots (bucket, observed_at, payload) VALUES ($1, $2, $3::jsonb)
+      ON CONFLICT (bucket) DO UPDATE SET observed_at = EXCLUDED.observed_at, payload = EXCLUDED.payload
+      WHERE EXCLUDED.observed_at > psm_intraday_snapshots.observed_at`, [bucket, sample.observedAt, JSON.stringify(sample)]);
+  }
+
+  async loadIntraday(now = new Date()): Promise<IntradaySnapshot[]> {
+    await this.initialize();
+    const result = await this.pool.query<{ payload: IntradaySnapshot }>(
+      `SELECT payload FROM psm_intraday_snapshots WHERE observed_at >= $1::timestamptz - interval '24 hours'
+        AND observed_at <= $1::timestamptz ORDER BY observed_at`, [now.toISOString()]);
+    return result.rows.map(row => row.payload);
   }
 
   async saveHistory(points: HistoryPoint[], interval: HistoryInterval): Promise<void> {
@@ -250,6 +267,12 @@ export class SnapshotStore implements SlackAlertStateStore, AddressLabelStore {
         updated_at timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY (sample_date, interval)
       );
+      CREATE TABLE IF NOT EXISTS psm_intraday_snapshots (
+        bucket timestamptz PRIMARY KEY,
+        observed_at timestamptz NOT NULL,
+        payload jsonb NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS psm_intraday_observed_idx ON psm_intraday_snapshots (observed_at);
       CREATE TABLE IF NOT EXISTS psm_address_labels (
         provider text NOT NULL,
         address text NOT NULL,

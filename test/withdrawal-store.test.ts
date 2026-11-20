@@ -38,6 +38,9 @@ it("Postgres commits events and cursors atomically and rejects competing stale w
     assert.equal(net[0]?.replenishedRaw, paidBack.toString());
     await store.savePage(psm, 40, [event("-1", "fully-repaid")], { ...state, nextBlock: 50 });
     assert.deepEqual(await store.totals(psm, time, time), []);
+    await store.savePage(psm, 50, [event("-100", "net-deposit")], { ...state, nextBlock: 60 });
+    assert.equal((await store.totals(psm, time, time, "depositors"))[0]?.amountRaw, "-100");
+    assert.deepEqual(await store.totals(psm, time, time), []);
   } finally {
     await cleanup.query("DELETE FROM psm_usdc_flow_events WHERE psm_address = $1", [psm]);
     await cleanup.query("DELETE FROM psm_usdc_flow_index WHERE psm_address = $1", [psm]);

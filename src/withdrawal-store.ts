@@ -1,3 +1,4 @@
+import type { FlowDirection } from "./withdrawals.js";
 import { Pool } from "pg";
 import type { WithdrawalRefreshState } from "./withdrawal-rate-limit.js";
 import type { WithdrawalEvent, WithdrawalIndexState, WithdrawalStorage, WithdrawalTotal } from "./withdrawals.js";
@@ -88,13 +89,13 @@ export class WithdrawalStore implements WithdrawalStorage {
     } catch (error) { await client.query("ROLLBACK"); throw error; }
     finally { client.release(); }
   }
-  async totals(psm: string, from: string, through: string): Promise<WithdrawalTotal[]> {
+  async totals(psm: string, from: string, through: string, direction: FlowDirection = "withdrawals"): Promise<WithdrawalTotal[]> {
     await this.initialize();
     const result = await this.pool.query<{ address: string; amount: string; withdrawn: string; replenished: string; swaps: number }>(`
       SELECT recipient AS address, SUM(amount_raw)::text AS amount,
         SUM(GREATEST(amount_raw, 0))::text AS withdrawn, SUM(GREATEST(-amount_raw, 0))::text AS replenished, COUNT(*)::integer AS swaps
       FROM psm_usdc_flow_events WHERE psm_address = $1 AND observed_at >= $2::timestamptz AND observed_at <= $3::timestamptz
-      GROUP BY recipient HAVING SUM(amount_raw) > 0 ORDER BY SUM(amount_raw) DESC, recipient ASC LIMIT 20`, [psm, from, through]);
+      GROUP BY recipient HAVING SUM(amount_raw) * $4::integer > 0 ORDER BY SUM(amount_raw) * $4::integer DESC, recipient ASC LIMIT 20`, [psm, from, through, direction === "depositors" ? -1 : 1]);
     return result.rows.map(row => ({ address: row.address, amountRaw: row.amount, withdrawnRaw: row.withdrawn, replenishedRaw: row.replenished, swaps: row.swaps }));
   }
   async close(): Promise<void> { await this.pool.end(); }
