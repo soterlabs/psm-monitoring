@@ -220,7 +220,7 @@ export class SnapshotStore implements SlackAlertStateStore, AddressLabelStore {
       last_balance_usdc: string;
       last_info_sent_at: Date | null;
       last_circulating_supply: string | null;
-    }>(`SELECT level, last_checked_at, last_balance_usdc::text, last_info_sent_at, last_circulating_supply::text FROM slack_ratio_alert_state WHERE singleton = true`);
+    }>(`SELECT level, last_checked_at, last_balance_usdc::text, last_info_sent_at, last_circulating_supply::text FROM slack_ratio_alert_state_v3 WHERE singleton = true`);
     const row = result.rows[0];
     if (!row) return undefined;
     return {
@@ -235,7 +235,7 @@ export class SnapshotStore implements SlackAlertStateStore, AddressLabelStore {
   async saveSlackAlertState(state: SlackAlertState): Promise<void> {
     await this.initialize();
     await this.pool.query(
-      `INSERT INTO slack_ratio_alert_state (singleton, level, last_checked_at, last_balance_usdc, last_info_sent_at, last_circulating_supply)
+      `INSERT INTO slack_ratio_alert_state_v3 (singleton, level, last_checked_at, last_balance_usdc, last_info_sent_at, last_circulating_supply)
        VALUES (true, $1, $2::timestamptz, $3::numeric, $4::timestamptz, $5::numeric)
        ON CONFLICT (singleton) DO UPDATE SET
          level = EXCLUDED.level,
@@ -296,8 +296,27 @@ export class SnapshotStore implements SlackAlertStateStore, AddressLabelStore {
         checked_at timestamptz NOT NULL,
         source text NOT NULL,
         provisional boolean NOT NULL,
-        CHECK (target_usdc = ceil(circulating_supply * 0.30 * 1000000) / 1000000)
+        CONSTRAINT psm_daily_targets_policy_check CHECK (target_usdc = ceil(circulating_supply * CASE WHEN sample_date >= DATE '2026-11-20' THEN 0.25 ELSE 0.30 END * 1000000) / 1000000)
       );
+      ALTER TABLE psm_daily_targets DROP CONSTRAINT IF EXISTS psm_daily_targets_check;
+      ALTER TABLE psm_daily_targets DROP CONSTRAINT IF EXISTS psm_daily_targets_policy_check;
+      UPDATE psm_daily_targets SET target_usdc = ceil(circulating_supply * 0.25 * 1000000) / 1000000
+        WHERE sample_date >= DATE '2026-11-20' AND target_usdc <> ceil(circulating_supply * 0.25 * 1000000) / 1000000;
+      ALTER TABLE psm_daily_targets ADD CONSTRAINT psm_daily_targets_policy_check CHECK
+        (target_usdc = ceil(circulating_supply * CASE WHEN sample_date >= DATE '2026-11-20' THEN 0.25 ELSE 0.30 END * 1000000) / 1000000);
+      WITH revised AS (
+        SELECT bucket, payload, (payload#>>'{reserve,totalBalanceUsdc}')::numeric AS balance,
+          (payload#>>'{reserve,circulatingSupply}')::numeric AS supply,
+          ceil((payload#>>'{reserve,circulatingSupply}')::numeric * 0.25 * 1000000) / 1000000 AS target
+        FROM psm_intraday_snapshots WHERE observed_at >= '2026-11-20T00:00:00Z'::timestamptz AND observed_at < '2026-11-21T00:00:00Z'::timestamptz
+          AND payload#>>'{reserve,targetPercent}' IS DISTINCT FROM '25'
+          AND (payload#>>'{reserve,circulatingSupply}')::numeric > 0
+      ) UPDATE psm_intraday_snapshots AS s SET payload = v.payload || jsonb_build_object('reserve', (v.payload->'reserve') || jsonb_build_object(
+        'targetPercent',25,'limitUsdc',v.target::text,'remainingUsdc',(v.target-v.balance)::text,
+        'utilizationPercent',v.balance/v.target*100,'yellowPercent',96,'orangePercent',88,
+        'reserveBand',CASE WHEN v.balance*100>=v.supply*25 THEN 'healthy' WHEN v.balance*100>=v.supply*24 THEN 'below_25' WHEN v.balance*100>=v.supply*22 THEN 'below_24' WHEN v.balance*100>=v.supply*20 THEN 'below_22' WHEN v.balance*100>=v.supply*18 THEN 'below_20' ELSE 'below_18' END,
+        'status',CASE WHEN v.balance*100>=v.supply*25 THEN 'healthy' WHEN v.balance*100>=v.supply*24 THEN 'warning' WHEN v.balance*100>=v.supply*22 THEN 'critical' ELSE 'low' END))
+        FROM revised v WHERE s.bucket=v.bucket;
       CREATE TABLE IF NOT EXISTS slack_alert_state (
         singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
         level text NOT NULL CONSTRAINT slack_alert_state_level_check
@@ -341,6 +360,16 @@ export class SnapshotStore implements SlackAlertStateStore, AddressLabelStore {
         SELECT singleton, 'healthy', last_checked_at, last_balance_usdc, last_info_sent_at
         FROM slack_alert_state
       ON CONFLICT (singleton) DO NOTHING;
+      CREATE TABLE IF NOT EXISTS slack_ratio_alert_state_v3 (
+        singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+        level text NOT NULL CHECK (level IN ('healthy','below_25','below_24','below_22','below_20','below_18')),
+        last_checked_at timestamptz NOT NULL, last_balance_usdc numeric(30,6) NOT NULL,
+        last_info_sent_at timestamptz, last_circulating_supply numeric(40,18)
+      );
+      INSERT INTO slack_ratio_alert_state_v3 (singleton,level,last_checked_at,last_balance_usdc,last_info_sent_at,last_circulating_supply)
+        SELECT singleton,'healthy',last_checked_at,last_balance_usdc,last_info_sent_at,last_circulating_supply FROM slack_ratio_alert_state
+      ON CONFLICT(singleton) DO NOTHING;
+
     `);
       await client.query("COMMIT");
     } catch (error) { await client.query("ROLLBACK"); throw error; }

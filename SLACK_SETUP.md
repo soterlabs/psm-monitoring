@@ -25,23 +25,27 @@ Apply the Railway configuration after merging the PR. It creates a dedicated `sl
 
 ## Alert policy
 
+Effective November 20, 2026 at 00:00 UTC, the target is 25% (previously 30%).
+
 The numerator is canonical USDC held by the LitePSM pocket plus USDC held directly by the LitePSM, read at one Ethereum block. The denominator is **circulating USDS + DAI**, fetched afresh from `https://sky.data.blockanalitica.com/internal/supply/` (`total_circulating`). It is not USDS `totalSupply()` or sUSDS deposits. `SKY_DATA_API_URL` can override the API base on the Slack cron. The components must reconcile and supply must be positive; failed or invalid supply reads stop the check without sending or advancing state. Messages include the supply value and fetch timestamp. The source does not provide an onchain block for its circulation estimate; the USDC balance and supply estimate have separate timestamps.
 
 | USDC reserve / circulating USDS + DAI | Slack message |
 | --- | --- |
-| `≥ 30%` | No threshold alert; one untagged full-recovery message after a lower band |
-| `< 30%` and `≥ 28%` | Downward-crossing message; no mention |
-| `< 28%` and `≥ 25%` | Downward-crossing message; no mention |
-| `< 25%` and `≥ 20%` | Important threshold; `@here`; SFF internal-reaction callout |
-| `< 20%` | 🚨 **ACTION NEEDED**; `@here`; urgent SFF refill callout |
+| `≥ 25%` | No threshold alert; one untagged full-recovery message after a lower band |
+| `< 25%` and `≥ 24%` | Downward-crossing message; no mention |
+| `< 24%` and `≥ 22%` | Downward-crossing message; no mention |
+| `< 22%` and `≥ 20%` | Important threshold; `@here`; SFF internal-reaction callout |
+| `< 20%` and `≥ 18%` | 🚨 **ACTION NEEDED**; `@here`; urgent SFF refill callout |
 
-Comparisons use full token precision, with strict below-threshold boundaries and no floating-point decisions. Ratios can cross thresholds because reserves decrease or circulating supply increases. Only the deepest band observed in a check is sent. The cron checks every ten minutes and sends an untagged balance/ratio update every twelve hours. Lower-band messages are not repeated merely because time elapsed; partial recoveries update the observed band quietly, and a later downward recrossing sends again. Recovery to at least 30% sends one untagged message.
+| `< 18%` | Stronger alarm; `@here`; urgent SFF refill callout |
 
-The greater-than-10M USDC consecutive-check drop note is retained. It is untagged unless appended to an independently triggered 25% or 20% threshold message. Slack `@here` uses `<!here>`.
+Comparisons use full token precision, with strict below-threshold boundaries and no floating-point decisions. Ratios can cross thresholds because reserves decrease or circulating supply increases. Only the deepest band observed in a check is sent. The cron checks every ten minutes and sends an untagged balance/ratio update every twelve hours. Lower-band messages are not repeated merely because time elapsed; partial recoveries update the observed band quietly, and a later downward recrossing sends again. Recovery to at least 25% sends one untagged message.
 
-The existing SFF wording is retained unless an actual Slack recipient is configured. To directly mention a group, set `SLACK_SFF_MENTION` on `slack-psm-alerts` to `<!subteam^S0123456789>`; for a user, use `<@U0123456789>`. Use a real ID for the intended SFF recipient. The mention is included only at 25% and 20%, alongside `@here`. Keep this variable preserved if importing/updating the Railway infrastructure declaration.
+The greater-than-10M USDC consecutive-check drop note is retained. It is untagged unless appended to an independently triggered 22%, 20%, or 18% threshold message. Slack `@here` uses `<!here>`.
 
-On first startup, the ratio policy creates `slack_ratio_alert_state` separately from the legacy absolute-policy table. It seeds a healthy band with the previous checked balance and last information-message time so the first check reports any active ratio band without inventing an absolute-to-relative recovery. The old table and its accepted bands remain unchanged, so a still-running older worker can complete during rolling deployment. An information-message timestamp remains null until a message is actually delivered. Each new check records its supply denominator. Subsequent restarts preserve the ratio band and do not repeat already-delivered threshold messages.
+The existing SFF wording is retained unless an actual Slack recipient is configured. To directly mention a group, set `SLACK_SFF_MENTION` on `slack-psm-alerts` to `<!subteam^S0123456789>`; for a user, use `<@U0123456789>`. Use a real ID for the intended SFF recipient. The mention is included only at 22%, 20%, and 18%, alongside `@here`. Keep this variable preserved if importing/updating the Railway infrastructure declaration.
+
+On first startup, the ratio policy creates `slack_ratio_alert_state_v3` separately from the legacy absolute-policy table. It seeds a healthy band with the previous checked balance and last information-message time so the first check reports any active ratio band without inventing an absolute-to-relative recovery. The old table and its accepted bands remain unchanged, so a still-running older worker can complete during rolling deployment. An information-message timestamp remains null until a message is actually delivered. Each new check records its supply denominator. Subsequent restarts preserve the ratio band and do not repeat already-delivered threshold messages.
 
 ## Verify safely
 

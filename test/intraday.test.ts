@@ -37,7 +37,7 @@ it("projects recorded intraday balances and targets without generating missing p
   assert.deepEqual(intradayHistory([]).points, []);
   const history = intradayHistory([sample("2026-11-20T12:00:00Z", "1000000000"), sample("2026-11-20T12:30:00Z", "1100000000")]);
   assert.equal(history.points.length, 2);
-  assert.equal(history.points[1]?.targetUsdc, "2600000000");
+  assert.equal(history.points[1]?.targetUsdc, "2166666666.5");
   assert.equal(history.points[1]?.balanceUsdc, "1100000000");
   const historic = sample("2026-11-20T12:00:00Z", "100");
   historic.backfilled = true; historic.supplyDate = "2026-11-20";

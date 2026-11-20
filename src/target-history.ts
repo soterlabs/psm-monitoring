@@ -1,5 +1,5 @@
 import { formatUnits, parseUnits } from "viem";
-import { reserveTargetRaw, supplyRaw } from "./supply.js";
+import { reserveTargetRaw, supplyRaw, targetPercentAt } from "./supply.js";
 import type { SnapshotStore } from "./database.js";
 import type { HistorySeries } from "./types.js";
 import { safeErrorMessage } from "./errors.js";
@@ -32,14 +32,18 @@ export async function readDailyTargets(request: typeof fetch = fetch, now = new 
     if (typeof total !== "string" || typeof usds !== "string" || typeof dai !== "string") throw new Error("Daily circulating supply components are missing");
     const difference = supplyRaw(total) - supplyRaw(usds, false) - supplyRaw(dai, false);
     if (difference > 10n ** 12n || difference < -(10n ** 12n)) throw new Error("Daily circulating supply components do not reconcile");
-    return [{ date, circulatingSupply: total, targetUsdc: formatUnits(reserveTargetRaw(total), 6), checkedAt: now.toISOString(), source: `${base}/supply/historic/`, provisional: date === today }];
+    return [{ date, circulatingSupply: total, targetUsdc: formatUnits(reserveTargetRaw(total, targetPercentAt(date)), 6), checkedAt: now.toISOString(), source: `${base}/supply/historic/`, provisional: date === today }];
   });
 }
 
 export function applyDailyTargets(series: HistorySeries, targets: DailyTarget[]) {
   const byDate = new Map(targets.map(target => [target.date, target]));
   const { limitUsdc: _legacyLimit, ...base } = series;
-  const targetAt = (date: string) => date < TARGET_POLICY_START ? "4000000000" : byDate.get(date)?.targetUsdc ?? null;
+  const targetAt = (date: string) => {
+    if (date < TARGET_POLICY_START) return "4000000000";
+    const daily = byDate.get(date);
+    return daily ? formatUnits(reserveTargetRaw(daily.circulatingSupply, targetPercentAt(date)), 6) : null;
+  };
   // Independent daily target curve keeps the Nov 4 transition accurate even
   // when reserve balances are sampled monthly or at a non-midnight UTC time.
   const targetPoints: { timestamp: string; targetUsdc: string | null }[] = [];
@@ -56,8 +60,8 @@ export function applyDailyTargets(series: HistorySeries, targets: DailyTarget[])
     points: series.points.map(point => {
       const date = point.timestamp.slice(0, 10), legacy = date < TARGET_POLICY_START;
       const daily = byDate.get(date);
-      const targetUsdc = legacy ? "4000000000" : daily?.targetUsdc ?? null;
-      return { ...point, targetUsdc, circulatingSupply: legacy ? null : daily?.circulatingSupply ?? null,
+      const targetUsdc = targetAt(date);
+      return { ...point, targetPercent: legacy ? null : targetPercentAt(date), targetUsdc, circulatingSupply: legacy ? null : daily?.circulatingSupply ?? null,
         targetProvisional: !legacy && (daily?.provisional ?? false),
         targetSource: legacy ? "fixed_4b" : daily?.source ?? null,
         targetCheckedAt: legacy ? null : daily?.checkedAt ?? null,
