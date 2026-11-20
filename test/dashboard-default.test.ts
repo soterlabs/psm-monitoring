@@ -43,4 +43,7 @@ it("supports the shared default periods for refill capacity without fabricating 
   assert.equal(latest.points.length, 1);
   assert.equal(latest.interval, "daily");
   assert.equal(latest.points[0]?.date, latest.asOf);
+  const halfYear = monitor.series.get("180d")!;
+  const cutoff = Date.parse(`${halfYear.asOf}T00:00:00Z`) - 179 * 86_400_000;
+  assert.ok(halfYear.points.every(point => Date.parse(`${point.date}T00:00:00Z`) >= cutoff));
 });

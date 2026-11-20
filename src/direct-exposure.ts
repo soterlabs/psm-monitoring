@@ -281,7 +281,9 @@ export class DirectExposureMonitor {
     const monthly = monthEnd(all.filter((point) => point.date >= "2025-01-01"));
     const base = { generatedAt, asOf, provisional: true, unit: "USD (USDC-equivalent)" as const, venues: directExposureVenues };
     this.series.set("24h", { ...base, range: "24h", interval: "daily", points: all.slice(-1) });
-    this.series.set("180d", { ...base, range: "180d", interval: "daily", points: all.slice(-180) });
+    const halfYearCutoff = new Date(`${asOf}T00:00:00Z`).getTime() - 179 * DAY_MS;
+    this.series.set("180d", { ...base, range: "180d", interval: "daily",
+      points: all.filter(point => new Date(`${point.date}T00:00:00Z`).getTime() >= halfYearCutoff) });
     this.series.set("90d", { ...base, range: "90d", interval: "daily", points: daily });
     this.series.set("30d", { ...base, range: "30d", interval: "daily", points: daily.slice(-30) });
     this.series.set("7d", { ...base, range: "7d", interval: "daily", points: daily.slice(-7) });
