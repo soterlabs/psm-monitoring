@@ -161,10 +161,11 @@ const server = createServer(async (request, response) => {
     return send(response, monitor.snapshot ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({ fresh, snapshot: monitor.snapshot ?? null, error: monitor.lastError ?? null })}\n`);
   }
   if (path === "/api/history") {
-    if (url.searchParams.get("range") === "24h") {
+    if (["24h", "1d", "7d"].includes(url.searchParams.get("range") ?? "")) {
+      const range = url.searchParams.get("range") === "7d" ? "7d" : "24h";
       try {
-        const samples = await store?.loadIntraday() ?? [];
-        return send(response, 200, "application/json; charset=utf-8", JSON.stringify({ series: intradayHistory(samples), loading: false, error: null }));
+        const samples = await store?.loadIntraday(new Date(), range === "7d" ? 7 : 1) ?? [];
+        return send(response, 200, "application/json; charset=utf-8", JSON.stringify({ series: intradayHistory(samples, range), loading: false, error: null }));
       } catch (error) { return send(response, 503, "application/json", JSON.stringify({ series: null, error: { message: safeErrorMessage(error) } })); }
     }
     await refreshHistory();
@@ -203,13 +204,7 @@ const server = createServer(async (request, response) => {
       return send(response, 400, "application/json; charset=utf-8", JSON.stringify({ error: { message: "Use 24h, 1d, 7d, 30d, 90d, or 180d" } }));
     }
     try {
-      const samples = requested === "24h" ? await store?.loadIntraday() ?? [] : [];
-      const saved = samples.at(-1);
-      const result = requested === "24h" ? {
-        status: saved ? 200 : 202,
-        body: { snapshot: saved ? saved[direction] : { range: "1d", rows: [], complete: false, indexedPercent: 0 },
-          sampledAt: saved?.observedAt ?? null, error: saved && Date.now() - Date.parse(saved.observedAt) > 20 * 60_000 ? { message: "Latest 10-minute snapshot is stale" } : null, retryAt: null },
-      } : await withdrawalResponse(withdrawals, requested as WithdrawalRange, 8_000, direction);
+      const result = await withdrawalResponse(withdrawals, (requested === "24h" ? "1d" : requested) as WithdrawalRange, 8_000, direction);
       void addressLabels.warm(result.body.snapshot.rows).catch(() => undefined);
       return send(response, result.status, "application/json; charset=utf-8", JSON.stringify({ ...result.body,
         labelsLoading: addressLabels.loading(result.body.snapshot.rows),

@@ -12,6 +12,9 @@ it("places the depositor card third, uses shared table styling, and offers the n
   assert.ok(dashboardHtml.indexOf('id="withdrawals"') < dashboardHtml.indexOf('id="depositors"'));
   assert.ok(dashboardHtml.indexOf('id="depositors"') < dashboardHtml.indexOf('id="exposure"'));
   assert.equal([...dashboardHtml.matchAll(/value="24h"/g)].length, 3);
+  assert.doesNotMatch(dashboardHtml, /<option value="1d">/);
+  assert.equal([...dashboardHtml.matchAll(/Last 24h - 10min updates/g)].length, 3);
+  assert.equal([...dashboardHtml.matchAll(/7 days - 10min updates/g)].length, 3);
   const ids = [...dashboardHtml.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
   assert.equal(new Set(ids).size, ids.length);
   for (const script of dashboardHtml.matchAll(/<script>([\s\S]*?)<\/script>/g)) new Script(script[1]!);
@@ -36,6 +39,12 @@ it("projects recorded intraday balances and targets without generating missing p
   assert.equal(history.points.length, 2);
   assert.equal(history.points[1]?.targetUsdc, "2600000000");
   assert.equal(history.points[1]?.balanceUsdc, "1100000000");
+  const historic = sample("2026-11-20T12:00:00Z", "100");
+  historic.backfilled = true; historic.supplyDate = "2026-11-20";
+  const week = intradayHistory([historic], "7d");
+  assert.equal(week.range, "7d");
+  assert.equal(week.points[0]?.backfilled, true);
+  assert.equal(week.points[0]?.supplyDate, "2026-11-20");
 });
 
 const url = process.env.WITHDRAWAL_TEST_DATABASE_URL;
@@ -52,6 +61,7 @@ it("stores one snapshot per ten-minute bucket and loads only the requested last 
     await store.saveIntraday(sample("2026-11-19T11:00:00Z", "1"));
     const rows = await store.loadIntraday(new Date("2026-11-20T12:03:00Z"));
     assert.equal(rows.length, 1);
+    assert.equal((await store.loadIntraday(new Date("2026-11-20T12:03:00Z"), 7)).length, 2);
     assert.equal(rows[0]?.reserve.totalBalanceUsdc, "20");
   } finally { await store.close(); await admin.query(`DROP SCHEMA ${schema} CASCADE`); await admin.end(); }
 });
