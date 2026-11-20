@@ -44,7 +44,7 @@ describe("slackAlertLevel", () => {
   it("includes the current reserve ratio in every Slack message and fallback text", () => {
     const current = { ...snapshot("2600000000"), circulatingSupply: "8700000000" };
     const messages = [
-      ...(["below_30", "below_28", "below_25", "below_20"] as const).map(level => slackMessage(current, level)),
+      ...(["below_25", "below_24", "below_22", "below_20", "below_18"] as const).map(level => slackMessage(current, level)),
       slackMessage(current, "healthy", true),
       slackDropMessage(current, "2650000000", 50_000_000_000_000n),
       slackInformationMessage(current),
@@ -53,13 +53,13 @@ describe("slackAlertLevel", () => {
       assert.match(message.text, /Current reserve ratio: 29\.89% of circulating USDS \+ DAI \(8\.700B\)/);
       assert.match(JSON.stringify(message.blocks), /Current reserve ratio: \*29\.89%\*/);
     }
-    assert.match(slackMessage(snapshot("2999999999"), "below_30").text, /29\.999999%/);
+    assert.match(slackMessage(snapshot("2499999999"), "below_25").text, /24\.999999%/);
   });
   it("rounds half-hundredths exactly and preserves precision below every alert threshold", () => {
     assert.match(slackInformationMessage(snapshot("2614500000")).text, /Current reserve ratio: 26\.15%/);
     for (const [balance, ratio] of [
-      ["1999500000", "19.995"], ["2499500000", "24.995"],
-      ["2799500000", "27.995"], ["2999500000", "29.995"],
+      ["1799500000", "17.995"], ["1999500000", "19.995"], ["2399500000", "23.995"],
+      ["2199500000", "21.995"], ["2499500000", "24.995"],
     ]) {
       assert.ok(slackInformationMessage(snapshot(balance!)).text.includes(`Current reserve ratio: ${ratio}%`));
     }
@@ -70,24 +70,30 @@ describe("slackAlertLevel", () => {
   });
   it("uses exact relative boundaries without floating-point comparisons", () => {
     for (const [balance, expected] of [
-      ["3000000000", "healthy"], ["2999999999.999999", "below_30"],
-      ["2800000000", "below_30"], ["2799999999.999999", "below_28"],
-      ["2500000000", "below_28"], ["2499999999.999999", "below_25"],
-      ["2000000000", "below_25"], ["1999999999.999999", "below_20"],
+      ["2500000000", "healthy"], ["2499999999.999999", "below_25"],
+      ["2400000000", "below_25"], ["2399999999.999999", "below_24"],
+      ["2200000000", "below_24"], ["2199999999.999999", "below_22"],
+      ["2000000000", "below_22"], ["1999999999.999999", "below_20"],
+      ["1800000000", "below_20"], ["1799999999.999999", "below_18"],
     ] as const) assert.equal(slackAlertLevel(balance, "10000000000"), expected);
-    assert.equal(slackAlertLevel("2500000000", "10000000000.000000000000000001"), "below_25");
+    assert.equal(slackAlertLevel("2200000000", "10000000000.000000000000000001"), "below_22");
     assert.throws(() => slackAlertLevel("1", "0"), /positive/);
     assert.throws(() => slackAlertLevel("1", "NaN"), /decimal/);
   });
 
   it("uses team mentions only at important and critical thresholds", () => {
-    assert.doesNotMatch(slackMessage(snapshot("2950000000"), "below_30").text, /<!here>/);
-    assert.doesNotMatch(slackMessage(snapshot("2750000000"), "below_28").text, /<!here>/);
-    for (const level of ["below_25"] as const) {
-      const text = slackMessage(snapshot("2450000000"), level).text;
+    assert.doesNotMatch(slackMessage(snapshot("2450000000"), "below_25").text, /<!here>/);
+    assert.doesNotMatch(slackMessage(snapshot("2350000000"), "below_24").text, /<!here>/);
+    for (const level of ["below_22"] as const) {
+      const text = slackMessage(snapshot("2150000000"), level).text;
       assert.match(text, /<!here>/);
       assert.match(text, /SFF should be notified for internal reaction/);
     }
+    const deepest = slackMessage(snapshot("1790000000"), "below_18", false, 0n, "<!subteam^S123>").text;
+    assert.match(deepest, /🚨🚨 ACTION NEEDED — PSM below 18%/);
+    assert.match(deepest, /<!here>/);
+    assert.match(deepest, /<!subteam\^S123>/);
+    assert.match(deepest, /notified urgently/);
     const critical = slackMessage(snapshot("1990000000"), "below_20").text;
     assert.match(critical, /<!here>/);
     assert.match(critical, /🚨 ACTION NEEDED/);
@@ -104,15 +110,15 @@ describe("SlackAlerter", () => {
     const store: SlackAlertStateStore = {
       async loadSlackAlertState() {
         if (++loads === 1) throw new Error("database temporarily unavailable");
-        return { level: "below_25", lastCheckedAt: "2026-09-23T12:00:00Z", lastBalanceUsdc: "2450000000", lastInfoSentAt: "2026-09-23T12:00:00Z" };
+        return { level: "below_22", lastCheckedAt: "2026-09-23T12:00:00Z", lastBalanceUsdc: "2150000000", lastInfoSentAt: "2026-09-23T12:00:00Z" };
       },
       async saveSlackAlertState() {},
     };
     const post = (async () => { posts++; return new Response("ok"); }) as typeof fetch;
     const alerter = new SlackAlerter({ webhookUrl: "https://example.com/slack" }, store, post);
     const now = Date.parse("2026-09-23T12:10:00Z");
-    await assert.rejects(alerter.check(snapshot("2450000000"), now), /temporarily unavailable/);
-    await alerter.check(snapshot("2450000000"), now);
+    await assert.rejects(alerter.check(snapshot("2150000000"), now), /temporarily unavailable/);
+    await alerter.check(snapshot("2150000000"), now);
     assert.equal(loads, 2); assert.equal(posts, 0);
   });
   it("reacts to supply growth with unchanged USDC and persists the ratio band", async () => {
@@ -120,12 +126,12 @@ describe("SlackAlerter", () => {
     const post = (async (_url, init) => { payloads.push(JSON.parse(String(init?.body))); return new Response("ok"); }) as typeof fetch;
     const start = Date.parse("2026-09-23T12:00:00Z");
     const alerter = new SlackAlerter({ webhookUrl: "https://example.com/slack" }, store, post);
-    await alerter.check({ ...snapshot("2700000000"), circulatingSupply: "8700000000" }, start);
-    await alerter.check(snapshot("2700000000"), start + 600000);
-    assert.equal(payloads.length, 2); assert.match(payloads[1]!.text, /below 28%/);
+    await alerter.check({ ...snapshot("2300000000"), circulatingSupply: "8700000000" }, start);
+    await alerter.check(snapshot("2300000000"), start + 600000);
+    assert.equal(payloads.length, 2); assert.match(payloads[1]!.text, /below 24%/);
     assert.equal(store.state?.lastCirculatingSupply, "10000000000");
     const restarted = new SlackAlerter({ webhookUrl: "https://example.com/slack" }, store, post);
-    await restarted.check(snapshot("2700000000"), start + 1200000);
+    await restarted.check(snapshot("2300000000"), start + 1200000);
     assert.equal(payloads.length, 2);
   });
   it("rejects missing or invalid supply without sending or advancing state", async () => {
@@ -145,31 +151,31 @@ describe("SlackAlerter", () => {
     const alerter = new SlackAlerter({ webhookUrl: "https://hooks.slack.com/services/test" }, store, post as typeof fetch);
     const start = Date.parse("2026-09-23T12:00:00.000Z");
 
-    await alerter.check(snapshot("3050000000"), start);
+    await alerter.check(snapshot("2550000000"), start);
     assert.equal(payloads.length, 1, "the initial healthy check sends only the information note");
-    await alerter.check(snapshot("2950000000"), start + 600_000);
+    await alerter.check(snapshot("2450000000"), start + 600_000);
     assert.equal(payloads.length, 2);
-    assert.match(payloads[1]!.text, /below 30%/);
+    assert.match(payloads[1]!.text, /below 25%/);
     assert.doesNotMatch(payloads[1]!.text, /<!here>/);
 
-    await alerter.check(snapshot("2750000000"), start + 1_200_000);
+    await alerter.check(snapshot("2350000000"), start + 1_200_000);
     assert.equal(payloads.length, 3);
-    assert.match(payloads[2]!.text, /below 28%/);
+    assert.match(payloads[2]!.text, /below 24%/);
 
-    await alerter.check(snapshot("2450000000"), start + 1_800_000);
+    await alerter.check(snapshot("2150000000"), start + 1_800_000);
     assert.equal(payloads.length, 4);
     assert.match(payloads[3]!.text, /<!here>/);
     assert.match(payloads[3]!.text, /SFF should be notified/);
 
-    await alerter.check(snapshot("2750000000"), start + 2_400_000);
+    await alerter.check(snapshot("2350000000"), start + 2_400_000);
     assert.equal(payloads.length, 4, "does not alert on a partial upward move");
-    await alerter.check(snapshot("2450000000"), start + 3_000_000);
+    await alerter.check(snapshot("2150000000"), start + 3_000_000);
     assert.equal(payloads.length, 5, "alerts when the important threshold is crossed downward again");
 
-    await alerter.check(snapshot("2450000000"), start + 7_200_000);
+    await alerter.check(snapshot("2150000000"), start + 7_200_000);
     assert.equal(payloads.length, 5, "does not repeat a threshold merely because time elapsed");
 
-    await alerter.check(snapshot("3050000000"), start + 7_800_000);
+    await alerter.check(snapshot("2550000000"), start + 7_800_000);
     assert.equal(payloads.length, 6);
     assert.match(payloads[5]!.text, /recovered/);
   });
@@ -177,16 +183,16 @@ describe("SlackAlerter", () => {
   it("restores the observed level to avoid duplicate messages after restart", async () => {
     const store = new MemoryStore();
     store.state = {
-      level: "below_30",
+      level: "below_25",
       lastCheckedAt: "2026-09-23T12:00:00.000Z",
-      lastBalanceUsdc: "2940000000",
+      lastBalanceUsdc: "2440000000",
       lastInfoSentAt: "2026-09-23T12:00:00.000Z",
     };
     let posts = 0;
     const post = async (): Promise<Response> => { posts += 1; return new Response("ok"); };
     const alerter = new SlackAlerter({ webhookUrl: "https://hooks.slack.com/services/test" }, store, post as typeof fetch);
 
-    await alerter.check(snapshot("2940000000"), Date.parse("2026-09-23T12:10:00.000Z"));
+    await alerter.check(snapshot("2440000000"), Date.parse("2026-09-23T12:10:00.000Z"));
     assert.equal(posts, 0);
   });
 
@@ -195,7 +201,7 @@ describe("SlackAlerter", () => {
     store.state = {
       level: "healthy",
       lastCheckedAt: "2026-09-23T12:00:00.000Z",
-      lastBalanceUsdc: "2450000000",
+      lastBalanceUsdc: "2150000000",
       lastInfoSentAt: "2026-09-23T12:00:00.000Z",
     };
     const payloads: Array<{ text: string }> = [];
@@ -205,10 +211,10 @@ describe("SlackAlerter", () => {
     };
     const alerter = new SlackAlerter({ webhookUrl: "https://hooks.slack.com/services/test" }, store, post as typeof fetch);
 
-    await alerter.check(snapshot("2450000000"), Date.parse("2026-09-23T12:10:00.000Z"));
+    await alerter.check(snapshot("2150000000"), Date.parse("2026-09-23T12:10:00.000Z"));
     assert.equal(payloads.length, 1);
     assert.match(payloads[0]!.text, /<!here>/);
-    assert.match(payloads[0]!.text, /below 25%/);
+    assert.match(payloads[0]!.text, /below 22%/);
   });
 
   it("does not replay a tagged crossing when a simultaneous information post fails", async () => {
@@ -216,7 +222,7 @@ describe("SlackAlerter", () => {
     store.state = {
       level: "healthy",
       lastCheckedAt: "2026-09-23T00:00:00.000Z",
-      lastBalanceUsdc: "3050000000",
+      lastBalanceUsdc: "2550000000",
       lastInfoSentAt: "2026-09-23T00:00:00.000Z",
     };
     let posts = 0;
@@ -231,8 +237,8 @@ describe("SlackAlerter", () => {
       failingSecondPost as typeof fetch,
     );
 
-    await assert.rejects(firstRun.check(snapshot("2450000000"), start), /HTTP 500/);
-    assert.equal(store.state?.level, "below_25", "the delivered crossing is checkpointed");
+    await assert.rejects(firstRun.check(snapshot("2150000000"), start), /HTTP 500/);
+    assert.equal(store.state?.level, "below_22", "the delivered crossing is checkpointed");
     assert.equal(store.state?.lastInfoSentAt, "2026-09-23T00:00:00.000Z", "the failed information post remains due");
 
     const retryPayloads: Array<{ text: string }> = [];
@@ -241,7 +247,7 @@ describe("SlackAlerter", () => {
       return new Response("ok");
     };
     const retry = new SlackAlerter({ webhookUrl: "https://hooks.slack.com/services/test" }, store, retryPost as typeof fetch);
-    await retry.check(snapshot("2450000000"), start + 600_000);
+    await retry.check(snapshot("2150000000"), start + 600_000);
     assert.equal(retryPayloads.length, 1);
     assert.match(retryPayloads[0]!.text, /PSM balance update/);
     assert.doesNotMatch(retryPayloads[0]!.text, /<!here>/);
@@ -278,9 +284,9 @@ describe("SlackAlerter", () => {
     const alerter = new SlackAlerter({ webhookUrl: "https://hooks.slack.com/services/test" }, store, post as typeof fetch);
     const start = Date.parse("2026-09-23T12:00:00.000Z");
 
-    await alerter.check(snapshot("2450000000"), start);
+    await alerter.check(snapshot("2150000000"), start);
     assert.match(payloads[0]!.text, /<!here>/);
-    await alerter.check(snapshot("2439000000"), start + 600_000);
+    await alerter.check(snapshot("2139000000"), start + 600_000);
     assert.equal(payloads.length, 3);
     assert.match(payloads[2]!.text, /balance movement/i);
     assert.doesNotMatch(payloads[2]!.text, /<!here>/);

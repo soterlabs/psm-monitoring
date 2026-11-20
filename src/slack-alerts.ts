@@ -4,7 +4,7 @@ import { supplyRaw, reserveBand, type CirculatingSupply } from "./supply.js";
 
 export type SlackAlertSnapshot = StatusSnapshot & CirculatingSupply;
 
-export const slackAlertLevels = ["healthy", "below_30", "below_28", "below_25", "below_20"] as const;
+export const slackAlertLevels = ["healthy", "below_25", "below_24", "below_22", "below_20", "below_18"] as const;
 export type SlackAlertLevel = (typeof slackAlertLevels)[number];
 
 export interface SlackAlertState {
@@ -33,7 +33,7 @@ const SEVERITY: Record<SlackAlertLevel, number> = Object.fromEntries(
 ) as Record<SlackAlertLevel, number>;
 
 export function slackAlertLevel(balanceUsdc: string, circulatingSupply: string): SlackAlertLevel {
-  return reserveBand(balanceUsdc, circulatingSupply);
+  return reserveBand(balanceUsdc, circulatingSupply) as SlackAlertLevel;
 }
 
 function coverage(snapshot: SlackAlertSnapshot): string {
@@ -44,7 +44,7 @@ function coverage(snapshot: SlackAlertSnapshot): string {
   const hundredths = (numerator * 100n + denominator / 2n) / denominator;
   const rounded = `${hundredths / 100n}.${(hundredths % 100n).toString().padStart(2, "0")}`;
   // Avoid a below-threshold alert displaying a rounded ratio at the threshold.
-  const crossesBoundary = [20n, 25n, 28n, 30n].some(value => numerator < denominator * value && hundredths >= value * 100n);
+  const crossesBoundary = [18n, 20n, 22n, 24n, 25n].some(value => numerator < denominator * value && hundredths >= value * 100n);
   return `${crossesBoundary ? formatUnits(numerator * 1_000_000n / denominator, 6) : rounded}%`;
 }
 
@@ -75,19 +75,19 @@ export function slackMessage(
 
   if (recovery) {
     title = "✅ PSM balance recovered";
-    message = `The PSM USDC balance is back at or above 30% of circulating USDS + DAI.\n${details}`;
-  } else if (level === "below_20") {
-    title = "🚨 ACTION NEEDED";
-    message = `<!here> 🚨 The PSM USDC balance crossed below 20% of circulating USDS + DAI. ${sff} should be notified urgently that the PSM should be refilled.\n${details}`;
-  } else if (level === "below_25") {
+    message = `The PSM USDC balance is back at or above 25% of circulating USDS + DAI.\n${details}`;
+  } else if (level === "below_18" || level === "below_20") {
+    title = level === "below_18" ? "🚨🚨 ACTION NEEDED — PSM below 18%" : "🚨 ACTION NEEDED";
+    message = `<!here> 🚨 The PSM USDC balance crossed below ${level === "below_18" ? 18 : 20}% of circulating USDS + DAI. ${sff} should be notified urgently that the PSM should be refilled.\n${details}`;
+  } else if (level === "below_22") {
     title = "⚠️ Important PSM balance threshold";
-    message = `<!here> The PSM USDC balance crossed below 25% of circulating USDS + DAI. ${sff} should be notified for internal reaction.\n${details}`;
-  } else if (level === "below_28") {
-    title = "PSM reserve ratio below 28%";
-    message = `The PSM USDC balance crossed below 28% of circulating USDS + DAI.\n${details}`;
+    message = `<!here> The PSM USDC balance crossed below 22% of circulating USDS + DAI. ${sff} should be notified for internal reaction.\n${details}`;
+  } else if (level === "below_24") {
+    title = "PSM reserve ratio below 24%";
+    message = `The PSM USDC balance crossed below 24% of circulating USDS + DAI.\n${details}`;
   } else {
-    title = "PSM reserve ratio below 30%";
-    message = `The PSM USDC balance crossed below 30% of circulating USDS + DAI.\n${details}`;
+    title = "PSM reserve ratio below 25%";
+    message = `The PSM USDC balance crossed below 25% of circulating USDS + DAI.\n${details}`;
   }
 
   if (dropRaw > LARGE_DROP_RAW) {

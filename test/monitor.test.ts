@@ -16,8 +16,8 @@ it("marks the dashboard stale on supply failure and never substitutes the config
       psmAddress: "0xpsm", pocketAddress: "0xpocket", tokenAddress: "0xusdc", pocketBalanceRaw: 2700000000000000n,
       psmBalanceRaw: 0n, totalBalanceRaw: 2700000000000000n }));
   await monitor.poll();
-  assert.equal(monitor.snapshot?.limitUsdc, "2610000000"); assert.equal(monitor.isFresh(), true);
+  assert.equal(monitor.snapshot?.limitUsdc, "2175000000"); assert.equal(monitor.isFresh(), true);
   failed = true; await monitor.poll();
-  assert.equal(monitor.isFresh(), false); assert.equal(monitor.snapshot?.limitUsdc, "2610000000");
+  assert.equal(monitor.isFresh(), false); assert.equal(monitor.snapshot?.limitUsdc, "2175000000");
   assert.equal(monitor.lastError?.message, "Supply unavailable");
 });
