@@ -182,7 +182,7 @@ const server = createServer(async (request, response) => {
   if (path === "/api/direct-exposure") {
     await refreshDirectExposure();
     const requested = url.searchParams.get("range");
-    const range = requested === "7d" || requested === "30d" || requested === "ytd" || requested === "all" || requested === "monthly" ? requested : "90d";
+    const range = requested === "24h" || requested === "180d" || requested === "7d" || requested === "30d" || requested === "ytd" || requested === "all" || requested === "monthly" ? requested : "90d";
     return send(response, directExposure.series.has(range) ? 200 : 503, "application/json; charset=utf-8", `${JSON.stringify({
       loading: directExposure.loading,
       series: directExposure.series.get(range) ?? null,

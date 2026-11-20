@@ -11,7 +11,7 @@ import { Script } from "node:vm";
 it("places the depositor card third, uses shared table styling, and offers the new option on both flow cards", () => {
   assert.ok(dashboardHtml.indexOf('id="withdrawals"') < dashboardHtml.indexOf('id="depositors"'));
   assert.ok(dashboardHtml.indexOf('id="depositors"') < dashboardHtml.indexOf('id="exposure"'));
-  assert.equal([...dashboardHtml.matchAll(/value="24h"/g)].length, 3);
+  assert.equal([...dashboardHtml.matchAll(/value="24h"/g)].length, 4);
   assert.doesNotMatch(dashboardHtml, /<option value="1d">/);
   assert.equal([...dashboardHtml.matchAll(/Last 24h - 10min updates/g)].length, 3);
   assert.equal([...dashboardHtml.matchAll(/7 days - 10min updates/g)].length, 3);
