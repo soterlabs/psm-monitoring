@@ -51,11 +51,11 @@ export class SnapshotStore implements SlackAlertStateStore, AddressLabelStore {
       WHERE EXCLUDED.observed_at > psm_intraday_snapshots.observed_at`, [bucket, sample.observedAt, JSON.stringify(sample)]);
   }
 
-  async loadIntraday(now = new Date()): Promise<IntradaySnapshot[]> {
+  async loadIntraday(now = new Date(), days: 1 | 7 = 1): Promise<IntradaySnapshot[]> {
     await this.initialize();
     const result = await this.pool.query<{ payload: IntradaySnapshot }>(
-      `SELECT payload FROM psm_intraday_snapshots WHERE observed_at >= $1::timestamptz - interval '24 hours'
-        AND observed_at <= $1::timestamptz ORDER BY observed_at`, [now.toISOString()]);
+      `SELECT payload FROM psm_intraday_snapshots WHERE observed_at >= $1::timestamptz - ($2::integer * interval '1 day')
+        AND observed_at <= $1::timestamptz ORDER BY observed_at`, [now.toISOString(), days]);
     return result.rows.map(row => row.payload);
   }
 
