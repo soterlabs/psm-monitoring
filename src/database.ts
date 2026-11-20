@@ -272,6 +272,7 @@ export class SnapshotStore implements SlackAlertStateStore, AddressLabelStore {
         observed_at timestamptz NOT NULL,
         payload jsonb NOT NULL
       );
+      CREATE INDEX IF NOT EXISTS psm_intraday_observed_idx ON psm_intraday_snapshots (observed_at);
       CREATE TABLE IF NOT EXISTS psm_address_labels (
         provider text NOT NULL,
         address text NOT NULL,
