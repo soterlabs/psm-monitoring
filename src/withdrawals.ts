@@ -5,6 +5,7 @@ import { safeErrorMessage } from "./errors.js";
 import { WithdrawalRateLimitError, withdrawalRetryAt, type WithdrawalRefreshState } from "./withdrawal-rate-limit.js";
 
 export const withdrawalRanges = ["1d", "7d", "30d", "90d", "180d"] as const;
+export type FlowDirection = "withdrawals" | "depositors";
 export type WithdrawalRange = typeof withdrawalRanges[number];
 export const buyGemEvent = parseAbiItem("event BuyGem(address indexed owner, uint256 value, uint256 fee)");
 export const buyGemTopic = toEventSelector(buyGemEvent);
@@ -50,7 +51,7 @@ export interface WithdrawalTotal { address: string; amountRaw: string; withdrawn
 export interface WithdrawalStorage {
   load(psm: string): Promise<WithdrawalIndexState | undefined>;
   savePage(psm: string, expectedNextBlock: number | undefined, events: WithdrawalEvent[], state: WithdrawalIndexState): Promise<void>;
-  totals(psm: string, from: string, through: string): Promise<WithdrawalTotal[]>;
+  totals(psm: string, from: string, through: string, direction?: FlowDirection): Promise<WithdrawalTotal[]>;
   close(): Promise<void>;
   withRefreshLock?(psm: string, operation: () => Promise<void>): Promise<void>;
   loadRefreshState?(psm: string): Promise<WithdrawalRefreshState | undefined>;
@@ -70,7 +71,7 @@ export class MemoryWithdrawalStorage implements WithdrawalStorage {
     this.events.set(psm, stored);
     this.states.set(psm, state);
   }
-  async totals(psm: string, from: string, through: string): Promise<WithdrawalTotal[]> {
+  async totals(psm: string, from: string, through: string, direction?: FlowDirection): Promise<WithdrawalTotal[]> {
     const totals = new Map<string, { amount: bigint; withdrawn: bigint; replenished: bigint; swaps: number }>();
     for (const event of this.events.get(psm)?.values() ?? []) {
       if (event.timestamp < from || event.timestamp > through) continue;
@@ -81,8 +82,8 @@ export class MemoryWithdrawalStorage implements WithdrawalStorage {
       total.swaps++;
       totals.set(event.recipient, total);
     }
-    return [...totals].filter(([, total]) => total.amount > 0n).map(([address, total]) => ({ address, amountRaw: total.amount.toString(), withdrawnRaw: total.withdrawn.toString(), replenishedRaw: total.replenished.toString(), swaps: total.swaps }))
-      .sort(compareWithdrawalTotals).slice(0, 20);
+    return [...totals].filter(([, total]) => (direction === "depositors" ? total.amount < 0n : total.amount > 0n)).map(([address, total]) => ({ address, amountRaw: total.amount.toString(), withdrawnRaw: total.withdrawn.toString(), replenishedRaw: total.replenished.toString(), swaps: total.swaps }))
+      .sort((a, b) => compareWithdrawalTotals(a, b, direction)).slice(0, 20);
   }
   async close(): Promise<void> {}
   async loadRefreshState(psm: string) { return this.refreshStates.get(psm); }
@@ -94,8 +95,8 @@ export class MemoryWithdrawalStorage implements WithdrawalStorage {
   }
 }
 
-export function compareWithdrawalTotals(a: WithdrawalTotal, b: WithdrawalTotal): number {
-  const difference = BigInt(b.amountRaw) - BigInt(a.amountRaw);
+export function compareWithdrawalTotals(a: WithdrawalTotal, b: WithdrawalTotal, direction: FlowDirection = "withdrawals"): number {
+  const difference = (BigInt(b.amountRaw) - BigInt(a.amountRaw)) * (direction === "depositors" ? -1n : 1n);
   return difference > 0n ? 1 : difference < 0n ? -1 : a.address.localeCompare(b.address);
 }
 
@@ -293,7 +294,7 @@ export class WithdrawalMonitor {
     });
   }
 
-  async result(range: WithdrawalRange) {
+  async result(range: WithdrawalRange, direction: FlowDirection = "withdrawals") {
     const wasRefreshing = Boolean(this.refreshing);
     const psm = this.config.psmAddress.toLowerCase();
     const [state, sharedRefresh] = await Promise.all([
@@ -308,22 +309,22 @@ export class WithdrawalMonitor {
     const asOf = state?.throughTimestamp;
     const from = asOf ? new Date(Date.parse(asOf) - Number(range.slice(0, -1)) * 86400_000).toISOString() : undefined;
     const covered = from && state && state.startTimestamp <= from;
-    const rows = covered ? await this.storage.totals(this.config.psmAddress.toLowerCase(), from, asOf!) : [];
+    const rows = covered ? await this.storage.totals(this.config.psmAddress.toLowerCase(), from, asOf!, direction) : [];
     return {
-      range, complete: Boolean(covered), asOf: asOf ?? null, from: from ?? null,
+      range, direction, complete: Boolean(covered), asOf: asOf ?? null, from: from ?? null,
       syncPending: Boolean(state && state.nextBlock <= state.targetBlock),
       indexedPercent: state ? Math.min(100, Math.max(0, (Date.parse(state.throughTimestamp) - Date.parse(state.startTimestamp)) / (Number(range.slice(0, -1)) * 86400_000) * 100)) : 0,
-      attribution: "Net USDC withdrawn minus replenished per reserve counterparty. Canonical USDS wrapper deposits credited to their funding caller; other routers can represent multiple users.",
+      attribution: (direction === "depositors" ? "Net USDC replenished minus withdrawn. " : "Net USDC withdrawn minus replenished. ") + "Per reserve counterparty. Canonical USDS wrapper deposits credited to their funding caller; other routers can represent multiple users.",
       rows: rows.map((row, index) => ({ rank: index + 1, address: getAddress(row.address), label: withdrawalLabels[row.address.toLowerCase()] ?? null,
-        netWithdrawnUsdc: formatUnits(BigInt(row.amountRaw), 6), withdrawnUsdc: formatUnits(BigInt(row.withdrawnRaw), 6), replenishedUsdc: formatUnits(BigInt(row.replenishedRaw), 6), swaps: row.swaps, etherscanUrl: `https://etherscan.io/address/${row.address}` })),
+        netWithdrawnUsdc: formatUnits(BigInt(row.amountRaw), 6), netDepositedUsdc: formatUnits(-BigInt(row.amountRaw), 6), withdrawnUsdc: formatUnits(BigInt(row.withdrawnRaw), 6), replenishedUsdc: formatUnits(BigInt(row.replenishedRaw), 6), swaps: row.swaps, etherscanUrl: `https://etherscan.io/address/${row.address}` })),
     };
   }
 }
 
 // Cached windows stay usable while older history is indexed. Initial requests have
 // a bounded wait; refresh errors are captured even when the response returns first.
-export async function withdrawalResponse(monitor: WithdrawalMonitor, range: WithdrawalRange, waitMs = 8_000) {
-  const cached = await monitor.result(range);
+export async function withdrawalResponse(monitor: WithdrawalMonitor, range: WithdrawalRange, waitMs = 8_000, direction: FlowDirection = "withdrawals") {
+  const cached = await monitor.result(range, direction);
   const refresh = monitor.refresh().catch(() => undefined);
   if (!cached.complete) {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -331,7 +332,7 @@ export async function withdrawalResponse(monitor: WithdrawalMonitor, range: With
       await Promise.race([refresh, new Promise<void>(resolve => { timer = setTimeout(resolve, waitMs); })]);
     } finally { if (timer) clearTimeout(timer); }
   }
-  const snapshot = cached.complete ? cached : await monitor.result(range);
+  const snapshot = cached.complete ? cached : await monitor.result(range, direction);
   const error = monitor.lastError ? { ...monitor.lastError } : null;
   return { status: snapshot.complete ? 200 : error ? 503 : 202, body: { snapshot, error, retryAt: monitor.retryAt ?? null } };
 }
